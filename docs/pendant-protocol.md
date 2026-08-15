@@ -1,6 +1,6 @@
 # Protocolo futuro do pendant
 
-O ESP32-S3 será um cliente não confiável e nunca armazenará chaves de provedores de IA. Ele autenticará no JARVIS Core com credencial revogável própria do dispositivo, sobre TLS.
+O ESP32-S3 será um cliente não confiável e nunca armazenará chaves de provedores de IA. Ele autenticará no NOX Core com credencial revogável própria do dispositivo, sobre TLS.
 
 Proposta inicial, ainda não implementada:
 

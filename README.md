@@ -1,4 +1,4 @@
-# JARVIS Core
+# NOX Core
 
 Fundação do backend de um agente pessoal multimodal, independente dos clientes e orientado a ferramentas. Este milestone implementa o fluxo texto → API → agente → OpenRouter → tool → permissão → resposta.
 
@@ -29,6 +29,8 @@ tests                    testes do runtime e API
 ```
 
 ## Executar
+
+> **Limitação atual:** `PERSISTENCE_DRIVER=postgres` persiste confirmações e auditoria, mas a memória de conversa ainda usa `InMemoryMemoryStore`. A persistência de memória em PostgreSQL faz parte do backlog imediato de Eko/Ambient Memory.
 
 Requer Node.js 22+ e pnpm.
 

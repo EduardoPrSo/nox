@@ -1,10 +1,10 @@
-import type { AIProvider, ChatRequest, ChatResponse } from '@jarvis/ai';
-import { AgentRuntime } from '@jarvis/agent';
-import { InMemoryAuditRepository, sanitize } from '@jarvis/audit';
-import { InMemoryConfirmationRepository } from '@jarvis/confirmations';
-import { InMemoryMemoryStore } from '@jarvis/memory';
-import { DefaultPermissionEngine } from '@jarvis/permissions';
-import { ToolRegistry, createMockTools } from '@jarvis/tools';
+import type { AIProvider, ChatRequest, ChatResponse } from '@nox/ai';
+import { AgentRuntime } from '@nox/agent';
+import { InMemoryAuditRepository, sanitize } from '@nox/audit';
+import { InMemoryConfirmationRepository } from '@nox/confirmations';
+import { InMemoryMemoryStore } from '@nox/memory';
+import { DefaultPermissionEngine } from '@nox/permissions';
+import { ToolRegistry, createMockTools } from '@nox/tools';
 
 class QueueProvider implements AIProvider {
   readonly requests: ChatRequest[] = [];
@@ -52,6 +52,8 @@ describe('AgentRuntime', () => {
     await expect(
       subject.runtime.run({ userId: 'u1', message: 'Que horas são?' }),
     ).resolves.toMatchObject({ type: 'message', content: 'São 12:00 UTC.' });
+    expect(provider.requests[0]?.messages[0]?.role).toBe('system');
+    expect(provider.requests[0]?.messages[0]?.content).toContain('You are NOX');
     expect(subject.audit.events.some((event) => event.type === 'tool_result')).toBe(true);
   });
 

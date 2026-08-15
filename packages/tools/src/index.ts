@@ -1,5 +1,5 @@
 import { z } from 'zod';
-import type { PermissionLevel } from '@jarvis/permissions';
+import type { PermissionLevel } from '@nox/permissions';
 
 export type ToolContext = { userId: string; requestId: string; signal: AbortSignal };
 export type ToolResult = { success: true; data: unknown } | { success: false; error: string };

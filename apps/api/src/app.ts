@@ -1,14 +1,14 @@
 import Fastify, { type FastifyInstance } from 'fastify';
 import { z } from 'zod';
-import { AgentRuntime } from '@jarvis/agent';
-import { OpenRouterProvider, type AIProvider } from '@jarvis/ai';
-import { InMemoryAuditRepository, type AuditRepository } from '@jarvis/audit';
-import { InMemoryConfirmationRepository, type ConfirmationRepository } from '@jarvis/confirmations';
-import { createPostgresRepositories } from '@jarvis/database';
-import { InMemoryMemoryStore, type MemoryStore } from '@jarvis/memory';
-import { DefaultPermissionEngine, type PermissionEngine } from '@jarvis/permissions';
-import type { Env } from '@jarvis/shared';
-import { ToolRegistry, createMockTools } from '@jarvis/tools';
+import { AgentRuntime } from '@nox/agent';
+import { OpenRouterProvider, type AIProvider } from '@nox/ai';
+import { InMemoryAuditRepository, type AuditRepository } from '@nox/audit';
+import { InMemoryConfirmationRepository, type ConfirmationRepository } from '@nox/confirmations';
+import { createPostgresRepositories } from '@nox/database';
+import { InMemoryMemoryStore, type MemoryStore } from '@nox/memory';
+import { DefaultPermissionEngine, type PermissionEngine } from '@nox/permissions';
+import type { Env } from '@nox/shared';
+import { ToolRegistry, createMockTools } from '@nox/tools';
 
 const chatSchema = z.object({ message: z.string().min(1).max(20_000) });
 const confirmationSchema = z.object({ approved: z.boolean() });
@@ -49,6 +49,7 @@ export function buildApp(env: Env, overrides: Overrides = {}): FastifyInstance {
       postgresRepositories?.confirmations ??
       new InMemoryConfirmationRepository(ttlMs),
     audit: overrides.audit ?? postgresRepositories?.audit ?? new InMemoryAuditRepository(),
+    // TODO(Eko/Ambient Memory): use a PostgreSQL MemoryStore when persistence is enabled.
     memory: overrides.memory ?? new InMemoryMemoryStore(),
   });
   app.get('/health', async () => ({ status: 'ok' }));

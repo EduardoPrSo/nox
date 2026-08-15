@@ -1,4 +1,4 @@
-import type { AIMessage } from '@jarvis/ai';
+import type { AIMessage } from '@nox/ai';
 export type MemoryKind = 'conversation' | 'preference' | 'fact' | 'event' | 'automation_rule';
 export type MemoryRecord = {
   id: string;

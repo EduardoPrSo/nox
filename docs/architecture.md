@@ -18,7 +18,9 @@ O loop tem no máximo seis iterações. Tools têm timeout lógico de dez segund
 
 ## Persistência e Supabase
 
-**Supabase é nossa plataforma de infraestrutura de dados, mas não faz parte do domínio do JARVIS.** O JARVIS Core continua independente e portável: `AgentRuntime` depende de `AuditRepository` e `ConfirmationRepository`; adapters InMemory ou Drizzle satisfazem esses contratos. Trocar o destino PostgreSQL exige configuração, não alteração no domínio.
+> **Backlog imediato — Eko/Ambient Memory:** mesmo com `PERSISTENCE_DRIVER=postgres`, a memória de conversa ainda usa `InMemoryMemoryStore` e é perdida ao reiniciar o processo. Implementar um adapter PostgreSQL de `MemoryStore` e conectá-lo na API.
+
+**Supabase é nossa plataforma de infraestrutura de dados, mas não faz parte do domínio do NOX.** O NOX Core continua independente e portátil: `AgentRuntime` depende de `AuditRepository` e `ConfirmationRepository`; adapters InMemory ou Drizzle satisfazem esses contratos. Trocar o destino PostgreSQL exige configuração, não alteração no domínio.
 
 Este marco persiste `audit_logs` e `confirmations`, as entidades necessárias ao fluxo atual. Evoluções previstas, criadas somente quando usadas: users, devices, conversations, messages, memories, tool_calls, permissions, automations, automation_runs, media e ai_usage.
 

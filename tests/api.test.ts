@@ -1,6 +1,6 @@
-import type { AIProvider } from '@jarvis/ai';
+import type { AIProvider } from '@nox/ai';
 import { buildApp } from '../apps/api/src/app.js';
-import type { Env } from '@jarvis/shared';
+import type { Env } from '@nox/shared';
 
 const env: Env = {
   NODE_ENV: 'test',
@@ -10,7 +10,7 @@ const env: Env = {
   OPENROUTER_API_KEY: 'test',
   OPENROUTER_MODEL: 'test',
   OPENROUTER_BASE_URL: 'https://example.com',
-  OPENROUTER_APP_NAME: 'JARVIS',
+  OPENROUTER_APP_NAME: 'NOX',
   ACTION_TOOLS_AUTO_ALLOWED: false,
   CONFIRMATION_TTL_SECONDS: 300,
 };

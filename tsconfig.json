@@ -13,7 +13,7 @@
     "types": ["node", "vitest/globals"],
     "baseUrl": ".",
     "paths": {
-      "@jarvis/*": ["packages/*/src/index.ts"]
+      "@nox/*": ["packages/*/src/index.ts"]
     }
   },
   "include": [

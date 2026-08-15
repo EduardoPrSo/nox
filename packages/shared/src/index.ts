@@ -10,7 +10,7 @@ export const envSchema = z.object({
   OPENROUTER_MODEL: z.string().default('openai/gpt-4.1-mini'),
   OPENROUTER_BASE_URL: z.string().url().default('https://openrouter.ai/api/v1'),
   OPENROUTER_SITE_URL: z.string().url().optional(),
-  OPENROUTER_APP_NAME: z.string().default('JARVIS'),
+  OPENROUTER_APP_NAME: z.string().default('NOX'),
   ACTION_TOOLS_AUTO_ALLOWED: z
     .enum(['true', 'false'])
     .default('false')

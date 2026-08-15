@@ -2,10 +2,10 @@ import { and, eq } from 'drizzle-orm';
 import { drizzle } from 'drizzle-orm/postgres-js';
 import { integer, jsonb, pgEnum, pgTable, text, timestamp, uuid } from 'drizzle-orm/pg-core';
 import postgres from 'postgres';
-import type { AuditRepository } from '@jarvis/audit';
-import { sanitize } from '@jarvis/audit';
-import type { ConfirmationRepository, PendingConfirmation } from '@jarvis/confirmations';
-import { hashArguments } from '@jarvis/confirmations';
+import type { AuditRepository } from '@nox/audit';
+import { sanitize } from '@nox/audit';
+import type { ConfirmationRepository, PendingConfirmation } from '@nox/confirmations';
+import { hashArguments } from '@nox/confirmations';
 
 export const confirmationStatus = pgEnum('confirmation_status', [
   'pending',

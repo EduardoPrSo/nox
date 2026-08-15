@@ -1,5 +1,5 @@
 import 'dotenv/config';
-import { loadEnv } from '@jarvis/shared';
+import { loadEnv } from '@nox/shared';
 import { buildApp } from './app.js';
 
 const env = loadEnv();
