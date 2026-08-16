@@ -191,12 +191,13 @@ describe('Voice API', () => {
     expect(body.requestId).toMatch(/^[0-9a-f-]{36}$/);
     expect(Object.values(body.latencyMs).every((value) => typeof value === 'number')).toBe(true);
     expect(stt.requests[0]).toMatchObject({ model: 'test-stt', format: 'wav', language: 'pt' });
+    expect(provider.requests[0]?.messages[0]?.content).toContain('This is a voice interaction.');
     expect(tts.requests[0]).toMatchObject({
       model: 'test-tts',
       voice: env.VOICE_TTS_VOICE,
       format: 'mp3',
     });
-    expect(usage.records.map((item) => item.capability).sort()).toEqual(['DEFAULT', 'STT', 'TTS']);
+    expect(usage.records.map((item) => item.capability).sort()).toEqual(['FAST', 'STT', 'TTS']);
     expect(new Set(usage.records.map((item) => item.requestId))).toEqual(new Set([body.requestId]));
     expect(usage.records.find((item) => item.capability === 'STT')).toMatchObject({
       conversationId: body.conversationId,
@@ -277,7 +278,6 @@ describe('Voice API', () => {
           ],
         },
       },
-      { message: { role: 'assistant', content: 'Consultei a hora.' } },
     ]);
     const app = buildApp(env, {
       provider,
@@ -293,9 +293,8 @@ describe('Voice API', () => {
     });
 
     expect(response.statusCode).toBe(200);
-    expect(response.json()).toMatchObject({ assistantText: 'Consultei a hora.' });
-    expect(provider.requests).toHaveLength(2);
-    expect(provider.requests[1]?.messages.some((message) => message.role === 'tool')).toBe(true);
+    expect(response.json<{ assistantText: string }>().assistantText).toMatch(/^São \d{2}:\d{2}\.$/);
+    expect(provider.requests).toHaveLength(1);
     await app.close();
   });
 
@@ -349,6 +348,54 @@ describe('Voice API', () => {
     expect(approved.statusCode).toBe(200);
     expect(approved.json()).toMatchObject({ type: 'message', content: 'Mensagem enviada.' });
     expect(provider.requests).toHaveLength(2);
+    await app.close();
+  });
+
+  it('speaks a confirmed climate readback without a second model call', async () => {
+    const provider = new QueueProvider([
+      {
+        message: {
+          role: 'assistant',
+          content: '',
+          toolCalls: [
+            {
+              id: 'voice-climate',
+              name: 'climate.set_temperature',
+              arguments: { temperatureCelsius: 23 },
+            },
+          ],
+        },
+      },
+    ]);
+    const tts = new MockTts();
+    const app = buildApp(env, {
+      provider,
+      stt: new MockStt('Coloque o ar em 23 graus'),
+      tts,
+    });
+    const upload = multipartAudio(validWav(), 'audio/wav');
+    const pendingResponse = await app.inject({
+      method: 'POST',
+      url: '/v1/voice',
+      headers: { ...authorization, 'content-type': upload.contentType },
+      payload: upload.body,
+    });
+    const pending = pendingResponse.json<{ confirmationId: string }>();
+    const approved = await app.inject({
+      method: 'POST',
+      url: `/v1/confirmations/${pending.confirmationId}`,
+      headers: authorization,
+      payload: { approved: true, interactionMode: 'voice' },
+    });
+    expect(approved.statusCode).toBe(200);
+    expect(approved.json()).toMatchObject({
+      content: 'Pronto, 23 graus.',
+      assistantText: 'Pronto, 23 graus.',
+      audio: { mimeType: 'audio/mpeg' },
+    });
+    expect(provider.requests).toHaveLength(1);
+    expect(tts.requests).toHaveLength(2);
+    expect(tts.requests[1]?.text).toBe('Pronto, 23 graus.');
     await app.close();
   });
 

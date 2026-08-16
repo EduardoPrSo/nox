@@ -221,6 +221,13 @@ export type VoicePartialResponse = Omit<VoiceResponse, 'audio' | 'latencyMs'> & 
   latencyMs: { stt: number; agent: number; tts: number; total: number };
 };
 
+export type VoiceSynthesisResponse = {
+  assistantText: string;
+  audio: { mimeType: string; data: string };
+  audioTextTruncated: boolean;
+  latencyMs: { stt: 0; agent: 0; tts: number; total: number };
+};
+
 export class VoiceStageError extends Error {
   constructor(
     readonly stage: 'STT' | 'TTS',
@@ -285,6 +292,7 @@ export class VoiceService {
       sessionId: input.sessionId,
       requestId,
       message: transcription.text,
+      interactionMode: 'voice',
       ...(input.conversationId ? { conversationId: input.conversationId } : {}),
     });
     const agentLatency = Math.round(performance.now() - agentStarted);
@@ -342,6 +350,44 @@ export class VoiceService {
         total: Math.round(performance.now() - totalStarted),
       },
     };
+  }
+
+  async synthesizeText(
+    input: IdentityContext & {
+      requestId: string;
+      conversationId: string;
+      text: string;
+    },
+  ): Promise<VoiceSynthesisResponse> {
+    const started = performance.now();
+    const route = this.dependencies.router.resolve('TTS');
+    const maxTtsCharacters = this.dependencies.maxTtsCharacters ?? 4_000;
+    const characters = [...input.text];
+    const synthesisText = characters.slice(0, maxTtsCharacters).join('');
+    const audioTextTruncated = characters.length > maxTtsCharacters;
+    try {
+      const synthesis = await this.dependencies.tts.synthesize({
+        text: synthesisText,
+        model: route.model,
+        voice: this.dependencies.voice,
+        format: this.dependencies.outputFormat ?? 'mp3',
+      });
+      await this.recordUsage(
+        usageRecord(synthesis.usage, 'TTS', input.requestId, input, input.conversationId),
+      );
+      const total = Math.round(performance.now() - started);
+      return {
+        assistantText: input.text,
+        audio: {
+          mimeType: synthesis.mimeType,
+          data: Buffer.from(synthesis.audio).toString('base64'),
+        },
+        audioTextTruncated,
+        latencyMs: { stt: 0, agent: 0, tts: total, total },
+      };
+    } catch (error) {
+      throw new VoiceStageError('TTS', undefined, { cause: error });
+    }
   }
 
   private async recordUsage(record: NewAIUsageRecord): Promise<void> {

@@ -10,6 +10,43 @@ export const MODEL_CAPABILITIES = [
 ] as const;
 export type ModelCapability = (typeof MODEL_CAPABILITIES)[number];
 
+export type InteractionMode = 'text' | 'voice';
+export type AgentModelCapability = Extract<
+  ModelCapability,
+  'FAST' | 'DEFAULT' | 'REASONING' | 'CODING'
+>;
+export type ModelSelectionReason =
+  | 'simple_request'
+  | 'voice_request'
+  | 'default_request'
+  | 'complex_reasoning'
+  | 'software_development';
+export type ModelSelection = {
+  capability: AgentModelCapability;
+  reason: ModelSelectionReason;
+};
+
+export interface ModelCapabilityPolicy {
+  select(input: { message: string; interactionMode: InteractionMode }): ModelSelection;
+}
+
+/**
+ * Conservative, backend-owned routing policy. It intentionally does not ask an
+ * LLM to choose its own tier and only promotes requests with explicit signals.
+ */
+export class DefaultModelCapabilityPolicy implements ModelCapabilityPolicy {
+  select(input: { message: string; interactionMode: InteractionMode }): ModelSelection {
+    const message = normalizeForPolicy(input.message);
+    if (isSoftwareDevelopmentRequest(message))
+      return { capability: 'CODING', reason: 'software_development' };
+    if (isComplexReasoningRequest(message))
+      return { capability: 'REASONING', reason: 'complex_reasoning' };
+    if (input.interactionMode === 'voice') return { capability: 'FAST', reason: 'voice_request' };
+    if (isSimpleRequest(message)) return { capability: 'FAST', reason: 'simple_request' };
+    return { capability: 'DEFAULT', reason: 'default_request' };
+  }
+}
+
 export type ModelRoute = {
   capability: ModelCapability;
   provider: string;
@@ -73,6 +110,7 @@ export type ChatRequest = {
   model: string;
   messages: AIMessage[];
   tools?: AITool[];
+  reasoningEffort?: 'none' | 'minimal' | 'low' | 'medium' | 'high' | 'xhigh' | 'max';
   signal?: AbortSignal;
 };
 export type AIUsage = {
@@ -168,8 +206,14 @@ export class OpenRouterProvider implements AIProvider {
         body: JSON.stringify({
           model: request.model,
           messages: request.messages.map(toProviderMessage),
-          tools: request.tools?.map((tool) => ({ type: 'function', function: tool })),
+          tools: request.tools?.map((tool) => ({
+            type: 'function',
+            function: { ...tool, name: providerToolName(tool.name) },
+          })),
           tool_choice: request.tools?.length ? 'auto' : undefined,
+          reasoning: request.reasoningEffort
+            ? { effort: request.reasoningEffort, exclude: true }
+            : undefined,
         }),
       },
     );
@@ -186,7 +230,7 @@ export class OpenRouterProvider implements AIProvider {
     if (value.tool_calls)
       message.toolCalls = value.tool_calls.map((call) => ({
         id: call.id,
-        name: call.function.name,
+        name: canonicalToolName(call.function.name),
         arguments: parseArguments(call.function.arguments),
       }));
     const usage: AIUsage = {
@@ -231,9 +275,19 @@ function toProviderMessage(message: AIMessage): Record<string, unknown> {
     result.tool_calls = message.toolCalls.map((call) => ({
       id: call.id,
       type: 'function',
-      function: { name: call.name, arguments: JSON.stringify(call.arguments) },
+      function: { name: providerToolName(call.name), arguments: JSON.stringify(call.arguments) },
     }));
   return result;
+}
+
+const TOOL_NAME_DOT_ESCAPE = '__dot__';
+
+export function providerToolName(name: string): string {
+  return name.replaceAll('.', TOOL_NAME_DOT_ESCAPE);
+}
+
+export function canonicalToolName(name: string): string {
+  return name.replaceAll(TOOL_NAME_DOT_ESCAPE, '.');
 }
 function parseArguments(value: string): unknown {
   try {
@@ -247,4 +301,48 @@ function decimalString(value: number | string | undefined): string | undefined {
     return Number.isFinite(value) && value >= 0 ? String(value) : undefined;
   if (typeof value === 'string' && /^\d+(?:\.\d+)?$/.test(value)) return value;
   return undefined;
+}
+
+function normalizeForPolicy(value: string): string {
+  return value
+    .normalize('NFD')
+    .replace(/[\u0300-\u036f]/g, '')
+    .toLowerCase()
+    .replace(/\s+/g, ' ')
+    .trim();
+}
+
+function isSoftwareDevelopmentRequest(message: string): boolean {
+  const explicitDevelopment =
+    /\b(programar|programacao|coding|debug|depurar|refatorar|refactor|pull request|code review|teste unitario|testes unitarios)\b/.test(
+      message,
+    );
+  const developmentVerb =
+    /\b(implemente|implementar|desenvolva|desenvolver|crie|criar|escreva|escrever|analise|analisar|corrija|corrigir|revise|revisar)\b/.test(
+      message,
+    );
+  const developmentTarget =
+    /\b(codigo|software|bug|typescript|javascript|python|sql|api|endpoint|funcao|classe|teste|testes)\b/.test(
+      message,
+    );
+  return explicitDevelopment || (developmentVerb && developmentTarget);
+}
+
+function isComplexReasoningRequest(message: string): boolean {
+  const explicitComplexity =
+    /\b(analise complexa|raciocinio profundo|multiplas restricoes|muitas dependencias|plano detalhado|planejamento detalhado|trade-?offs?|decisao complexa)\b/.test(
+      message,
+    );
+  const planningVerb = /\b(analise|analisar|planeje|planejar|compare|avalie|avaliar)\b/.test(
+    message,
+  );
+  const constraintSignals = (
+    message.match(/\b(considerando|restricao|dependencia|cenario|criterio|etapa)\b/g) ?? []
+  ).length;
+  return explicitComplexity || (planningVerb && constraintSignals >= 2);
+}
+
+function isSimpleRequest(message: string): boolean {
+  const wordCount = message ? message.split(' ').length : 0;
+  return message.length <= 240 && wordCount <= 40;
 }

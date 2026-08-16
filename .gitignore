@@ -4,3 +4,7 @@ dist/
 *.log
 work/
 outputs/
+.venv/
+__pycache__/
+.pytest_cache/
+*.pyc

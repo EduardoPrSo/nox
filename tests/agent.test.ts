@@ -7,6 +7,7 @@ import {
 } from '@nox/ai';
 import { AgentRuntime } from '@nox/agent';
 import { InMemoryAuditRepository, sanitize } from '@nox/audit';
+import { createClimateTools, MockClimateProvider } from '@nox/climate';
 import { InMemoryConfirmationRepository } from '@nox/confirmations';
 import { InMemoryMemoryStore } from '@nox/memory';
 import { DefaultPermissionEngine } from '@nox/permissions';
@@ -59,6 +60,7 @@ function runtime(
 ) {
   const tools = new ToolRegistry();
   for (const tool of createMockTools(() => new Date('2026-08-15T12:00:00Z'))) tools.register(tool);
+  for (const tool of createClimateTools(new MockClimateProvider(), 'test-ac')) tools.register(tool);
   const audit = new InMemoryAuditRepository();
   const usage = options.usage ?? new InMemoryAIUsageRepository();
   return {
@@ -91,12 +93,12 @@ describe('AgentRuntime', () => {
           toolCalls: [{ id: 'call-1', name: 'get_current_time', arguments: { timezone: 'UTC' } }],
         },
       },
-      { message: { role: 'assistant', content: 'São 12:00 UTC.' } },
     ]);
     const subject = runtime(provider);
     await expect(
       subject.runtime.run({ ...identity(), message: 'Que horas são?' }),
-    ).resolves.toMatchObject({ type: 'message', content: 'São 12:00 UTC.' });
+    ).resolves.toMatchObject({ type: 'message', content: 'São 12:00.' });
+    expect(provider.requests).toHaveLength(1);
     expect(provider.requests[0]?.messages[0]?.role).toBe('system');
     expect(provider.requests[0]?.messages[0]?.content).toContain('You are NOX');
     expect(provider.requests[0]?.messages[0]?.content).toContain(
@@ -158,7 +160,13 @@ describe('AgentRuntime', () => {
         message: {
           role: 'assistant',
           content: '',
-          toolCalls: [{ id: 'c', name: 'climate_set_temperature', arguments: { temperature: 23 } }],
+          toolCalls: [
+            {
+              id: 'c',
+              name: 'climate.set_temperature',
+              arguments: { temperatureCelsius: 23 },
+            },
+          ],
         },
       },
     ]);
@@ -184,15 +192,21 @@ describe('AgentRuntime', () => {
           role: 'assistant',
           content: '',
           toolCalls: [
-            { id: 'bad', name: 'climate_set_temperature', arguments: { temperature: 99 } },
+            {
+              id: 'bad',
+              name: 'climate.set_temperature',
+              arguments: { temperatureCelsius: 99 },
+            },
           ],
         },
       },
-      { message: { role: 'assistant', content: 'Temperatura inválida.' } },
     ]);
     await expect(
       runtime(provider, true).runtime.run({ ...identity(), message: 'Coloque em 99' }),
-    ).resolves.toMatchObject({ type: 'message', content: 'Temperatura inválida.' });
+    ).resolves.toMatchObject({
+      type: 'message',
+      content: 'Não consegui concluir essa solicitação.',
+    });
   });
   it('keeps conversation history when the runtime is recreated and limits context', async () => {
     const memory = new InMemoryMemoryStore();
@@ -227,10 +241,9 @@ describe('AgentRuntime', () => {
         message: {
           role: 'assistant',
           content: '',
-          toolCalls: [{ id: 'call-history', name: 'climate_get_status', arguments: {} }],
+          toolCalls: [{ id: 'call-history', name: 'climate.get_state', arguments: {} }],
         },
       },
-      { message: { role: 'assistant', content: 'O ar está em 24 graus.' } },
     ]);
     const first = runtime(firstProvider, false, { memory });
     const firstResponse = await first.runtime.run({ ...identity(), message: 'Como está o ar?' });
@@ -253,7 +266,7 @@ describe('AgentRuntime', () => {
     expect(recoveringProvider.requests[1]?.messages).toEqual([
       expect.objectContaining({ role: 'system' }),
       { role: 'user', content: 'Como está o ar?' },
-      { role: 'assistant', content: 'O ar está em 24 graus.' },
+      { role: 'assistant', content: 'Ligado, resfriando em 24 graus.' },
       { role: 'user', content: 'Continue.' },
     ]);
   });

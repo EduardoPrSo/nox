@@ -19,11 +19,13 @@ packages/ai              contrato AIProvider e OpenRouter
 packages/tools           registry e cinco mocks
 packages/permissions     decisões ALLOW/DENY/REQUIRE_CONFIRMATION
 packages/confirmations   fluxo de aprovação vinculado
+packages/climate         provider, tools e broker outbound de dispositivos
 packages/audit           eventos e sanitização
 packages/memory          portas e adapter simples
 packages/database        schema Drizzle/PostgreSQL
 packages/usage           observabilidade de IA e contratos de budget
 packages/voice           contratos STT/TTS, adapter OpenRouter e orquestração
+apps/device-bridge       worker Python para Midea LAN
 packages/identity        autenticação e contexto de identidade
 packages/automations     contrato futuro
 packages/shared          ambiente e utilitários
@@ -60,6 +62,8 @@ curl -X POST http://127.0.0.1:3000/v1/confirmations/ID -H "authorization: Bearer
 ```
 
 Para voz, abra `http://127.0.0.1:3000/voice` (ou a URL HTTPS da VPS), informe o mesmo Bearer token e segure o botão para falar. A rota autenticada `POST /v1/voice` também aceita multipart com `audio` e `conversationId` opcional. Consulte [docs/voice.md](docs/voice.md) para contrato, formatos, privacidade e verificação real.
+
+Para conectar o Core na VPS a um Midea dentro da rede residencial sem port forwarding, consulte [docs/device-bridge.md](docs/device-bridge.md). O mock continua sendo o driver padrão.
 
 ## Qualidade
 

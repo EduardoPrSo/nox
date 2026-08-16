@@ -1,4 +1,5 @@
 import multipart from '@fastify/multipart';
+import { timingSafeEqual } from 'node:crypto';
 import Fastify, { type FastifyInstance, type FastifyRequest } from 'fastify';
 import { z } from 'zod';
 import packageMetadata from '../../../package.json' with { type: 'json' };
@@ -6,13 +7,25 @@ import { AgentRuntime } from '@nox/agent';
 import {
   AIProviderError,
   ConfiguredModelRouter,
+  DefaultModelCapabilityPolicy,
   ModelCapabilityUnavailableError,
   OpenRouterProvider,
   type AIProvider,
   type ModelCapability,
+  type ModelCapabilityPolicy,
   type ModelRouter,
 } from '@nox/ai';
 import { InMemoryAuditRepository, type AuditRepository } from '@nox/audit';
+import {
+  BridgeClimateProvider,
+  InMemoryDeviceCommandBroker,
+  MockClimateProvider,
+  bridgeResultSchema,
+  createClimateTools,
+  type ClimateProvider,
+  type BridgeCommandResult,
+  type DeviceCommandBroker,
+} from '@nox/climate';
 import { InMemoryConfirmationRepository, type ConfirmationRepository } from '@nox/confirmations';
 import { createPostgresRepositories } from '@nox/database';
 import { StaticTokenAuthenticator, type IdentityContext } from '@nox/identity';
@@ -38,7 +51,10 @@ const chatSchema = z.object({
   conversationId: z.string().uuid().optional(),
   message: z.string().min(1).max(20_000),
 });
-const confirmationSchema = z.object({ approved: z.boolean() });
+const confirmationSchema = z.object({
+  approved: z.boolean(),
+  interactionMode: z.enum(['text', 'voice']).default('text'),
+});
 type Overrides = {
   provider?: AIProvider;
   audit?: AuditRepository;
@@ -46,9 +62,12 @@ type Overrides = {
   memory?: MemoryStore;
   permissions?: PermissionEngine;
   router?: ModelRouter;
+  modelPolicy?: ModelCapabilityPolicy;
   usage?: AIUsageRepository;
   stt?: SpeechToTextProvider;
   tts?: TextToSpeechProvider;
+  climate?: ClimateProvider;
+  bridgeBroker?: DeviceCommandBroker;
 };
 
 export function buildApp(env: Env, overrides: Overrides = {}): FastifyInstance {
@@ -64,14 +83,23 @@ export function buildApp(env: Env, overrides: Overrides = {}): FastifyInstance {
     deviceId: env.NOX_DEVICE_ID,
   });
   const requestIdentities = new WeakMap<object, IdentityContext>();
+  const bridgeBroker =
+    overrides.bridgeBroker ?? new InMemoryDeviceCommandBroker(env.DEVICE_BRIDGE_COMMAND_TIMEOUT_MS);
+  const climate =
+    overrides.climate ??
+    (env.CLIMATE_DRIVER === 'bridge'
+      ? new BridgeClimateProvider(bridgeBroker, env.NOX_DEVICE_BRIDGE_ID)
+      : new MockClimateProvider());
   const tools = new ToolRegistry();
   for (const tool of createMockTools()) tools.register(tool);
+  for (const tool of createClimateTools(climate, env.NOX_CLIMATE_DEVICE_ID)) tools.register(tool);
   const ttlMs = env.CONFIRMATION_TTL_SECONDS * 1000;
   const postgresRepositories =
     env.PERSISTENCE_DRIVER === 'postgres'
       ? createPostgresRepositories(requireDatabaseUrl(env.DATABASE_URL), ttlMs)
       : undefined;
   if (postgresRepositories) app.addHook('onClose', async () => postgresRepositories.close());
+  app.addHook('onClose', async () => bridgeBroker.close());
   const openRouterOptions = {
     apiKey: env.OPENROUTER_API_KEY,
     baseUrl: env.OPENROUTER_BASE_URL,
@@ -84,6 +112,13 @@ export function buildApp(env: Env, overrides: Overrides = {}): FastifyInstance {
   const runtime = new AgentRuntime({
     provider,
     router,
+    modelPolicy: overrides.modelPolicy ?? new DefaultModelCapabilityPolicy(),
+    reasoningEfforts: {
+      FAST: env.MODEL_FAST_REASONING_EFFORT,
+      DEFAULT: env.MODEL_DEFAULT_REASONING_EFFORT,
+      REASONING: env.MODEL_REASONING_REASONING_EFFORT,
+      CODING: env.MODEL_CODING_REASONING_EFFORT,
+    },
     tools,
     permissions:
       overrides.permissions ??
@@ -96,6 +131,9 @@ export function buildApp(env: Env, overrides: Overrides = {}): FastifyInstance {
     memory: overrides.memory ?? postgresRepositories?.memory ?? new InMemoryMemoryStore(),
     usage,
     contextMessageLimit: env.CONVERSATION_CONTEXT_MESSAGES,
+    ...(env.CLIMATE_DRIVER === 'bridge'
+      ? { toolTimeoutMs: env.DEVICE_BRIDGE_COMMAND_TIMEOUT_MS + 2_000 }
+      : {}),
     onTelemetryError: (error) => app.log.error({ err: error }, 'Could not persist AI usage'),
   });
   const voice = new VoiceService({
@@ -125,6 +163,34 @@ export function buildApp(env: Env, overrides: Overrides = {}): FastifyInstance {
       .type('text/html; charset=utf-8')
       .send(VOICE_CLIENT_HTML);
   });
+  if (env.CLIMATE_DRIVER === 'bridge' && !env.NOX_DEVICE_BRIDGE_TOKEN)
+    throw new Error('NOX_DEVICE_BRIDGE_TOKEN is required when CLIMATE_DRIVER=bridge');
+  if (env.NOX_DEVICE_BRIDGE_TOKEN) {
+    app.get('/bridge/v1/bridges/:bridgeId/commands/next', async (request, reply) => {
+      if (!authenticateBridge(request.headers.authorization, env.NOX_DEVICE_BRIDGE_TOKEN!))
+        return reply.code(401).send({ error: 'UNAUTHORIZED' });
+      const params = bridgeParamsSchema.safeParse(request.params);
+      if (!params.success) return reply.code(400).send({ error: 'INVALID_INPUT' });
+      if (params.data.bridgeId !== env.NOX_DEVICE_BRIDGE_ID)
+        return reply.code(403).send({ error: 'BRIDGE_NOT_ALLOWED' });
+      const command = await bridgeBroker.poll(params.data.bridgeId, env.DEVICE_BRIDGE_LONG_POLL_MS);
+      void reply.header('cache-control', 'no-store');
+      return command ? command : reply.code(204).send();
+    });
+    app.post('/bridge/v1/bridges/:bridgeId/commands/:commandId/result', async (request, reply) => {
+      if (!authenticateBridge(request.headers.authorization, env.NOX_DEVICE_BRIDGE_TOKEN!))
+        return reply.code(401).send({ error: 'UNAUTHORIZED' });
+      const params = bridgeResultParamsSchema.safeParse(request.params);
+      const body = bridgeResultSchema.safeParse(request.body);
+      if (!params.success || !body.success || params.data.commandId !== body.data.commandId)
+        return reply.code(400).send({ error: 'INVALID_INPUT' });
+      if (params.data.bridgeId !== env.NOX_DEVICE_BRIDGE_ID)
+        return reply.code(403).send({ error: 'BRIDGE_NOT_ALLOWED' });
+      if (!bridgeBroker.complete(params.data.bridgeId, normalizedBridgeResult(body.data)))
+        return reply.code(404).send({ error: 'COMMAND_NOT_FOUND' });
+      return reply.code(202).send({ accepted: true });
+    });
+  }
   app.addHook('onRequest', async (request, reply) => {
     if (!request.url.startsWith('/v1/')) return;
     const sessionHeader = request.headers['x-session-id'];
@@ -207,12 +273,25 @@ export function buildApp(env: Env, overrides: Overrides = {}): FastifyInstance {
       ...identity,
       confirmationId: params.data.id,
       approve: body.data.approved,
+      interactionMode: body.data.interactionMode,
     });
     if (result.type === 'error')
       return reply
         .code(result.code === 'NOT_FOUND' ? 404 : result.code === 'EXPIRED' ? 410 : 409)
         .send(result);
-    return result;
+    if (body.data.interactionMode !== 'voice') return result;
+    try {
+      const spoken = await voice.synthesizeText({
+        ...identity,
+        requestId: result.requestId,
+        conversationId: result.conversationId,
+        text: result.content,
+      });
+      return { ...result, ...spoken };
+    } catch (error) {
+      app.log.error({ err: error }, 'Could not synthesize confirmation response');
+      return { ...result, assistantText: result.content, audio: null, audioError: 'TTS_FAILED' };
+    }
   });
   app.setErrorHandler((error, _request, reply) => {
     app.log.error(error);
@@ -221,6 +300,41 @@ export function buildApp(env: Env, overrides: Overrides = {}): FastifyInstance {
       .send({ error: 'INTERNAL_ERROR', message: 'Não foi possível processar a solicitação.' });
   });
   return app;
+}
+
+const bridgeParamsSchema = z.object({ bridgeId: z.string().min(1).max(128) });
+const bridgeResultParamsSchema = bridgeParamsSchema.extend({ commandId: z.string().uuid() });
+
+function authenticateBridge(header: string | undefined, expectedToken: string): boolean {
+  if (!header?.startsWith('Bearer ')) return false;
+  const provided = Buffer.from(header.slice(7), 'utf8');
+  const expected = Buffer.from(expectedToken, 'utf8');
+  return provided.length === expected.length && timingSafeEqual(provided, expected);
+}
+
+function normalizedBridgeResult(input: z.output<typeof bridgeResultSchema>): BridgeCommandResult {
+  const state = input.state
+    ? {
+        power: input.state.power,
+        targetTemperatureCelsius: input.state.targetTemperatureCelsius,
+        mode: input.state.mode,
+        online: input.state.online,
+        ...(input.state.indoorTemperatureCelsius !== undefined
+          ? { indoorTemperatureCelsius: input.state.indoorTemperatureCelsius }
+          : {}),
+        ...(input.state.outdoorTemperatureCelsius !== undefined
+          ? { outdoorTemperatureCelsius: input.state.outdoorTemperatureCelsius }
+          : {}),
+      }
+    : undefined;
+  return {
+    commandId: input.commandId,
+    success: input.success,
+    confirmed: input.confirmed,
+    ...(state ? { state } : {}),
+    ...(input.code ? { code: input.code } : {}),
+    ...(input.error ? { error: input.error } : {}),
+  };
 }
 
 class VoiceRequestError extends Error {

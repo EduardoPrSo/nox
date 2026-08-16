@@ -1,0 +1,24 @@
+[build-system]
+requires = ["hatchling==1.27.0"]
+build-backend = "hatchling.build"
+
+[project]
+name = "nox-device-bridge"
+version = "0.1.0"
+description = "Outbound NOX bridge for local Midea climate devices"
+requires-python = ">=3.10"
+dependencies = ["httpx==0.28.1", "msmart-ng==2026.8.0", "python-dotenv==1.2.2"]
+
+[project.optional-dependencies]
+test = ["pytest==9.1.1", "pytest-asyncio==1.4.0"]
+
+[project.scripts]
+nox-device-bridge = "nox_bridge.main:entrypoint"
+nox-verify-midea = "nox_bridge.verify_midea:entrypoint"
+
+[tool.hatch.build.targets.wheel]
+packages = ["nox_bridge"]
+
+[tool.pytest.ini_options]
+asyncio_mode = "auto"
+testpaths = ["tests"]

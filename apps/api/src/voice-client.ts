@@ -186,11 +186,13 @@ export const VOICE_CLIENT_HTML = String.raw`<!doctype html>
         if (sessionId) headers['x-session-id'] = sessionId;
         try {
           const response = await fetch('/v1/confirmations/' + pendingConfirmationId, {
-            method: 'POST', headers: headers, body: JSON.stringify({ approved: approved })
+            method: 'POST', headers: headers, body: JSON.stringify({ approved: approved, interactionMode: 'voice' })
           });
           const body = await response.json();
           if (!response.ok) throw new Error(body.message || body.error || 'Falha na confirmação');
-          answerNode.textContent = body.content;
+          body.assistantText = body.assistantText || body.content;
+          body.transcription = '';
+          showResult(body);
           pendingConfirmationId = undefined;
           statusNode.textContent = 'Pronto';
         } catch (error) {

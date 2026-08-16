@@ -1,4 +1,4 @@
-import type { AIProvider } from '@nox/ai';
+import type { AIProvider, ChatRequest } from '@nox/ai';
 import { buildApp } from '../apps/api/src/app.js';
 import { InMemoryMemoryStore } from '@nox/memory';
 import type { Env } from '@nox/shared';
@@ -18,6 +18,11 @@ const env: Env = {
   NOX_API_TOKEN: 'test-token-with-at-least-32-characters',
   NOX_USER_ID: 'owner',
   NOX_DEVICE_ID: 'test-device',
+  CLIMATE_DRIVER: 'mock',
+  NOX_DEVICE_BRIDGE_ID: 'home',
+  NOX_CLIMATE_DEVICE_ID: 'home-ac',
+  DEVICE_BRIDGE_COMMAND_TIMEOUT_MS: 45_000,
+  DEVICE_BRIDGE_LONG_POLL_MS: 25_000,
   ACTION_TOOLS_AUTO_ALLOWED: false,
   CONFIRMATION_TTL_SECONDS: 300,
   CONVERSATION_CONTEXT_MESSAGES: 20,
@@ -121,5 +126,44 @@ describe('HTTP API', () => {
     expect(response.statusCode).toBe(404);
     expect(response.json()).toEqual({ error: 'CONVERSATION_NOT_FOUND' });
     await attackerApp.close();
+  });
+
+  it('keeps model tier selection under backend policy authority', async () => {
+    const requests: ChatRequest[] = [];
+    const recordingProvider: AIProvider = {
+      async chat(request) {
+        requests.push(request);
+        return { message: { role: 'assistant', content: 'Resposta.' } };
+      },
+      async *stream() {
+        yield '';
+      },
+    };
+    const app = buildApp(
+      {
+        ...env,
+        MODEL_FAST: 'luna',
+        MODEL_DEFAULT: 'luna',
+        MODEL_REASONING: 'terra',
+        MODEL_CODING: 'sol',
+      },
+      { provider: recordingProvider },
+    );
+    const messages = [
+      { message: 'Que horas são?', capability: 'CODING' },
+      { message: 'Faça uma análise complexa com múltiplas restrições.' },
+      { message: 'Refatore este código TypeScript e crie testes unitários.' },
+    ];
+    for (const payload of messages) {
+      const response = await app.inject({
+        method: 'POST',
+        url: '/v1/chat',
+        headers: { authorization: `Bearer ${env.NOX_API_TOKEN}` },
+        payload,
+      });
+      expect(response.statusCode).toBe(200);
+    }
+    expect(requests.map((request) => request.model)).toEqual(['luna', 'terra', 'sol']);
+    await app.close();
   });
 });

@@ -16,7 +16,9 @@
     "db:migrate": "drizzle-kit migrate",
     "verify:persistence": "tsx scripts/verify-persistence.ts",
     "verify:voice": "tsx scripts/verify-voice.ts",
-    "verify:voice:provider": "tsx scripts/verify-voice-provider.ts"
+    "verify:voice:provider": "tsx scripts/verify-voice-provider.ts",
+    "benchmark:models": "tsx scripts/benchmark-models.ts",
+    "benchmark:voice": "tsx scripts/benchmark-voice.ts"
   },
   "dependencies": {
     "@fastify/multipart": "^10.1.1",

@@ -3,7 +3,10 @@
 .env
 dist
 node_modules
+.venv
+__pycache__
+.pytest_cache
+*.pyc
 *.log
 work
 outputs
-

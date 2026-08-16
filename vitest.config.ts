@@ -7,6 +7,7 @@ const packageNames = [
   'audit',
   'automations',
   'confirmations',
+  'climate',
   'database',
   'identity',
   'memory',
