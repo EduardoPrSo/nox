@@ -20,7 +20,20 @@ rollback() {
 }
 trap rollback ERR
 
-"${COMPOSE[@]}" pull nox
+pulled=false
+for attempt in 1 2 3; do
+  if "${COMPOSE[@]}" pull --quiet nox; then
+    pulled=true
+    break
+  fi
+  echo "Image pull attempt $attempt failed; retrying..." >&2
+  sleep $((attempt * 5))
+done
+if [[ "$pulled" != true ]]; then
+  echo "Could not pull $NOX_IMAGE after 3 attempts." >&2
+  false
+fi
+
 NOX_IMAGE="$NOX_IMAGE" "${COMPOSE[@]}" up -d --no-build --remove-orphans nox
 
 healthy=false
@@ -41,4 +54,3 @@ trap - ERR
 printf '%s\n' "$previous_image" >.previous-image
 printf '%s\n' "$NOX_IMAGE" >.current-image
 echo "Deployed $NOX_IMAGE"
-
