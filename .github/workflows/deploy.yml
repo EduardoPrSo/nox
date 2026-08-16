@@ -64,7 +64,8 @@ jobs:
           VPS_HOST: ${{ secrets.VPS_HOST }}
           VPS_USER: ${{ secrets.VPS_USER }}
         run: |
-          printf '%s' "$GHCR_TOKEN" | ssh -i ~/.ssh/nox_deploy "$VPS_USER@$VPS_HOST" \
+          printf '%s' "$GHCR_TOKEN" | ssh -o ServerAliveInterval=30 -o ServerAliveCountMax=20 \
+            -i ~/.ssh/nox_deploy "$VPS_USER@$VPS_HOST" \
             "docker login ghcr.io -u '$GITHUB_ACTOR' --password-stdin"
       - name: Deploy and verify health
         env:
@@ -72,5 +73,6 @@ jobs:
           VPS_HOST: ${{ secrets.VPS_HOST }}
           VPS_USER: ${{ secrets.VPS_USER }}
         run: |
-          ssh -i ~/.ssh/nox_deploy "$VPS_USER@$VPS_HOST" \
+          ssh -o ServerAliveInterval=30 -o ServerAliveCountMax=20 \
+            -i ~/.ssh/nox_deploy "$VPS_USER@$VPS_HOST" \
             "cd /opt/nox && git fetch origin main && git checkout --detach '$GITHUB_SHA' && NOX_IMAGE='$DEPLOY_IMAGE' bash scripts/deploy.sh"
