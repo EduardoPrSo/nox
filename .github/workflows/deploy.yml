@@ -18,7 +18,25 @@ env:
   IMAGE_NAME: ghcr.io/eduardoprso/nox
 
 jobs:
+  validate:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: pnpm/action-setup@v4
+        with:
+          version: 10.15.0
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22
+          cache: pnpm
+      - run: pnpm install --frozen-lockfile
+      - run: pnpm typecheck
+      - run: pnpm lint
+      - run: pnpm test
+      - run: pnpm build
+
   image:
+    needs: validate
     runs-on: ubuntu-latest
     outputs:
       image: ${{ steps.image.outputs.image }}
