@@ -1,5 +1,6 @@
 import Fastify, { type FastifyInstance } from 'fastify';
 import { z } from 'zod';
+import packageMetadata from '../../../package.json' with { type: 'json' };
 import { AgentRuntime } from '@nox/agent';
 import { OpenRouterProvider, type AIProvider } from '@nox/ai';
 import { InMemoryAuditRepository, type AuditRepository } from '@nox/audit';
@@ -52,7 +53,7 @@ export function buildApp(env: Env, overrides: Overrides = {}): FastifyInstance {
     // TODO(Eko/Ambient Memory): use a PostgreSQL MemoryStore when persistence is enabled.
     memory: overrides.memory ?? new InMemoryMemoryStore(),
   });
-  app.get('/health', async () => ({ status: 'ok' }));
+  app.get('/health', async () => ({ status: 'ok', version: packageMetadata.version }));
   app.post('/v1/chat', async (request, reply) => {
     const parsed = chatSchema.safeParse(request.body);
     if (!parsed.success)

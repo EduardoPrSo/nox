@@ -54,6 +54,9 @@ describe('AgentRuntime', () => {
     ).resolves.toMatchObject({ type: 'message', content: 'São 12:00 UTC.' });
     expect(provider.requests[0]?.messages[0]?.role).toBe('system');
     expect(provider.requests[0]?.messages[0]?.content).toContain('You are NOX');
+    expect(provider.requests[0]?.messages[0]?.content).toContain(
+      'Respond in Brazilian Portuguese by default',
+    );
     expect(subject.audit.events.some((event) => event.type === 'tool_result')).toBe(true);
   });
 

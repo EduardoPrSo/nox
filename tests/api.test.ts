@@ -24,6 +24,14 @@ const provider: AIProvider = {
 };
 
 describe('HTTP API', () => {
+  it('reports its status and version', async () => {
+    const app = buildApp(env, { provider });
+    const response = await app.inject({ method: 'GET', url: '/health' });
+    expect(response.statusCode).toBe(200);
+    expect(response.json()).toEqual({ status: 'ok', version: '0.1.0' });
+    await app.close();
+  });
+
   it('validates input and serves chat', async () => {
     const app = buildApp(env, { provider });
     expect(
