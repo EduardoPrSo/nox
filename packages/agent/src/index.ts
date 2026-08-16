@@ -1,5 +1,6 @@
 import { randomUUID } from 'node:crypto';
 import { z } from 'zod';
+import { isInvalidProviderMessageError } from '@nox/ai';
 import type {
   AIMessage,
   AIProvider,
@@ -91,13 +92,32 @@ export class AgentRuntime {
     const capability = input.capability ?? 'DEFAULT';
     try {
       for (let iteration = 0; iteration < (this.dependencies.maxIterations ?? 6); iteration++) {
-        const response = await this.complete({
-          requestId,
-          identity,
-          capability,
-          messages,
-          tools: this.aiTools(),
-        });
+        let response: ChatResponse;
+        try {
+          response = await this.complete({
+            requestId,
+            identity,
+            capability,
+            messages,
+            tools: this.aiTools(),
+          });
+        } catch (error) {
+          const recoveredMessages = withoutHistoricalToolProtocol(messages);
+          if (
+            iteration !== 0 ||
+            !isInvalidProviderMessageError(error) ||
+            recoveredMessages.length === messages.length
+          )
+            throw error;
+          messages.splice(0, messages.length, ...recoveredMessages);
+          response = await this.complete({
+            requestId,
+            identity,
+            capability,
+            messages,
+            tools: this.aiTools(),
+          });
+        }
         messages.push(response.message);
         turnMessages.push(response.message);
         const calls = response.message.toolCalls ?? [];
@@ -422,4 +442,11 @@ export class AgentRuntime {
       },
     });
   }
+}
+
+function withoutHistoricalToolProtocol(messages: AIMessage[]): AIMessage[] {
+  return messages.filter(
+    (message) =>
+      message.role !== 'tool' && !(message.role === 'assistant' && message.toolCalls?.length),
+  );
 }

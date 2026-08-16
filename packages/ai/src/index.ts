@@ -94,6 +94,34 @@ export interface AIProvider {
   stream(request: ChatRequest): AsyncIterable<string>;
 }
 
+export class AIProviderError extends Error {
+  readonly retryable: boolean;
+
+  constructor(
+    readonly provider: string,
+    readonly status: number | undefined,
+    message: string,
+  ) {
+    super(message);
+    this.name = 'AIProviderError';
+    this.retryable =
+      status === undefined ||
+      status === 408 ||
+      status === 409 ||
+      status === 425 ||
+      status === 429 ||
+      status >= 500;
+  }
+}
+
+export function isInvalidProviderMessageError(error: unknown): error is AIProviderError {
+  return (
+    error instanceof AIProviderError &&
+    error.status === 400 &&
+    /messages\.\d+\.content:\s*Invalid input/i.test(error.message)
+  );
+}
+
 type Options = {
   apiKey: string;
   baseUrl?: string;
@@ -145,9 +173,13 @@ export class OpenRouterProvider implements AIProvider {
         }),
       },
     );
-    const payload = (await response.json()) as Payload;
+    const payload = await readPayload(response);
     if (!response.ok)
-      throw new Error(payload.error?.message ?? `OpenRouter error ${response.status}`);
+      throw new AIProviderError(
+        'openrouter',
+        response.status,
+        payload.error?.message ?? `OpenRouter error ${response.status}`,
+      );
     const value = payload.choices?.[0]?.message;
     if (!value) throw new Error('OpenRouter returned no message');
     const message: AIMessage = { role: 'assistant', content: value.content ?? '' };
@@ -175,6 +207,20 @@ export class OpenRouterProvider implements AIProvider {
   async *stream(request: ChatRequest): AsyncIterable<string> {
     const response = await this.chat(request);
     if (typeof response.message.content === 'string') yield response.message.content;
+  }
+}
+
+async function readPayload(response: Response): Promise<Payload> {
+  try {
+    return (await response.json()) as Payload;
+  } catch {
+    if (!response.ok)
+      throw new AIProviderError(
+        'openrouter',
+        response.status,
+        `OpenRouter error ${response.status}`,
+      );
+    throw new AIProviderError('openrouter', response.status, 'OpenRouter returned invalid JSON');
   }
 }
 

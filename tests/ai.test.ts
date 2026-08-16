@@ -20,6 +20,8 @@ describe('Model routing', () => {
 });
 
 describe('OpenRouterProvider', () => {
+  afterEach(() => vi.unstubAllGlobals());
+
   it('uses the per-request model and normalizes usage without leaking raw provider data', async () => {
     const fetchMock = vi.fn(async (_url: string | URL | Request, init?: RequestInit) => {
       if (typeof init?.body !== 'string') throw new Error('Expected a JSON request body');
@@ -59,6 +61,32 @@ describe('OpenRouterProvider', () => {
       cost: '0.00001234',
     });
     expect(response.usage?.latencyMs).toEqual(expect.any(Number));
-    vi.unstubAllGlobals();
+  });
+
+  it('preserves provider status and retryability without exposing the raw payload', async () => {
+    vi.stubGlobal(
+      'fetch',
+      vi.fn(
+        async () =>
+          new Response(
+            JSON.stringify({ error: { message: 'messages.9.content: Invalid input' } }),
+            {
+              status: 400,
+              headers: { 'content-type': 'application/json' },
+            },
+          ),
+      ),
+    );
+    const provider = new OpenRouterProvider({ apiKey: 'secret' });
+
+    await expect(
+      provider.chat({ model: 'configured-model', messages: [{ role: 'user', content: 'Oi' }] }),
+    ).rejects.toMatchObject({
+      name: 'AIProviderError',
+      provider: 'openrouter',
+      status: 400,
+      retryable: false,
+      message: 'messages.9.content: Invalid input',
+    });
   });
 });

@@ -1,4 +1,4 @@
-import type { AIProvider, ChatRequest, ChatResponse } from '@nox/ai';
+import { AIProviderError, type AIProvider, type ChatRequest, type ChatResponse } from '@nox/ai';
 import { InMemoryMemoryStore } from '@nox/memory';
 import { loadEnv } from '@nox/shared';
 import { InMemoryAIUsageRepository, type AIUsageRepository } from '@nox/usage';
@@ -381,6 +381,29 @@ describe('Voice API', () => {
       audio: null,
     });
     await ttsFailureApp.close();
+  });
+
+  it('returns a controlled gateway error when the chat provider fails', async () => {
+    const provider: AIProvider = {
+      async chat() {
+        throw new AIProviderError('openrouter', 503, 'upstream unavailable');
+      },
+      async *stream() {
+        yield '';
+      },
+    };
+    const app = voiceApp({ provider });
+    const upload = multipartAudio(validWav(), 'audio/wav');
+    const response = await app.inject({
+      method: 'POST',
+      url: '/v1/voice',
+      headers: { ...authorization, 'content-type': upload.contentType },
+      payload: upload.body,
+    });
+
+    expect(response.statusCode).toBe(502);
+    expect(response.json()).toEqual({ error: 'AI_PROVIDER_FAILED', retryable: true });
+    await app.close();
   });
 
   it('keeps voice responses working when telemetry persistence fails', async () => {

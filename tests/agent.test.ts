@@ -1,4 +1,5 @@
 import {
+  AIProviderError,
   ConfiguredModelRouter,
   type AIProvider,
   type ChatRequest,
@@ -21,6 +22,21 @@ class QueueProvider implements AIProvider {
     if (!response) throw new Error('No queued response');
     return response;
   }
+  async *stream(): AsyncIterable<string> {
+    yield '';
+  }
+}
+
+class RejectHistoricalToolProvider implements AIProvider {
+  readonly requests: ChatRequest[] = [];
+
+  async chat(request: ChatRequest): Promise<ChatResponse> {
+    this.requests.push(request);
+    if (request.messages.some((message) => message.role === 'tool'))
+      throw new AIProviderError('openrouter', 400, 'messages.3.content: Invalid input');
+    return { message: { role: 'assistant', content: 'Conversa recuperada.' } };
+  }
+
   async *stream(): AsyncIterable<string> {
     yield '';
   }
@@ -201,6 +217,44 @@ describe('AgentRuntime', () => {
       { role: 'user', content: 'Primeira pergunta' },
       { role: 'assistant', content: 'Primeira resposta.' },
       { role: 'user', content: 'Segunda pergunta' },
+    ]);
+  });
+
+  it('recovers from rejected persisted tool protocol without losing the conversation', async () => {
+    const memory = new InMemoryMemoryStore();
+    const firstProvider = new QueueProvider([
+      {
+        message: {
+          role: 'assistant',
+          content: '',
+          toolCalls: [{ id: 'call-history', name: 'climate_get_status', arguments: {} }],
+        },
+      },
+      { message: { role: 'assistant', content: 'O ar está em 24 graus.' } },
+    ]);
+    const first = runtime(firstProvider, false, { memory });
+    const firstResponse = await first.runtime.run({ ...identity(), message: 'Como está o ar?' });
+    if (firstResponse.type !== 'message') throw new Error('Expected message');
+
+    const recoveringProvider = new RejectHistoricalToolProvider();
+    const second = runtime(recoveringProvider, false, { memory });
+    await expect(
+      second.runtime.run({
+        ...identity(),
+        conversationId: firstResponse.conversationId,
+        message: 'Continue.',
+      }),
+    ).resolves.toMatchObject({ type: 'message', content: 'Conversa recuperada.' });
+
+    expect(recoveringProvider.requests).toHaveLength(2);
+    expect(
+      recoveringProvider.requests[0]?.messages.some((message) => message.role === 'tool'),
+    ).toBe(true);
+    expect(recoveringProvider.requests[1]?.messages).toEqual([
+      expect.objectContaining({ role: 'system' }),
+      { role: 'user', content: 'Como está o ar?' },
+      { role: 'assistant', content: 'O ar está em 24 graus.' },
+      { role: 'user', content: 'Continue.' },
     ]);
   });
 

@@ -4,6 +4,7 @@ import { z } from 'zod';
 import packageMetadata from '../../../package.json' with { type: 'json' };
 import { AgentRuntime } from '@nox/agent';
 import {
+  AIProviderError,
   ConfiguredModelRouter,
   ModelCapabilityUnavailableError,
   OpenRouterProvider,
@@ -155,6 +156,8 @@ export function buildApp(env: Env, overrides: Overrides = {}): FastifyInstance {
     } catch (error) {
       if (error instanceof ConversationNotFoundError)
         return reply.code(404).send({ error: 'CONVERSATION_NOT_FOUND' });
+      if (error instanceof AIProviderError)
+        return reply.code(502).send({ error: 'AI_PROVIDER_FAILED', retryable: error.retryable });
       throw error;
     }
   });
@@ -181,6 +184,8 @@ export function buildApp(env: Env, overrides: Overrides = {}): FastifyInstance {
         return reply.code(503).send({ error: 'VOICE_NOT_CONFIGURED' });
       if (error instanceof EmptyTranscriptionError)
         return reply.code(422).send({ error: 'EMPTY_TRANSCRIPTION' });
+      if (error instanceof AIProviderError)
+        return reply.code(502).send({ error: 'AI_PROVIDER_FAILED', retryable: error.retryable });
       if (error instanceof VoiceStageError) {
         app.log.error({ err: error.cause, stage: error.stage }, 'Voice provider failed');
         return reply.code(502).send({
