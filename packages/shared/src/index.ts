@@ -25,8 +25,8 @@ export const envSchema = z.object({
   MODEL_CODING: optionalModel,
   MODEL_VISION: optionalModel,
   MODEL_MEMORY: optionalModel,
-  MODEL_STT: optionalModel,
-  MODEL_TTS: optionalModel,
+  MODEL_STT: z.string().min(1).default('openai/gpt-4o-mini-transcribe'),
+  MODEL_TTS: z.string().min(1).default('hexgrad/kokoro-82m'),
   OPENROUTER_BASE_URL: z.string().url().default('https://openrouter.ai/api/v1'),
   OPENROUTER_SITE_URL: z.string().url().optional(),
   OPENROUTER_APP_NAME: z.string().default('NOX'),
@@ -39,6 +39,13 @@ export const envSchema = z.object({
     .transform((v) => v === 'true'),
   CONFIRMATION_TTL_SECONDS: z.coerce.number().int().positive().default(300),
   CONVERSATION_CONTEXT_MESSAGES: z.coerce.number().int().positive().max(100).default(20),
+  VOICE_LANGUAGE: z
+    .string()
+    .regex(/^[a-z]{2}(?:-[A-Z]{2})?$/)
+    .default('pt'),
+  VOICE_TTS_VOICE: z.string().min(1).max(128).default('pf_dora'),
+  VOICE_MAX_UPLOAD_BYTES: z.coerce.number().int().min(1_024).max(10_000_000).default(2_000_000),
+  VOICE_MAX_TTS_CHARACTERS: z.coerce.number().int().min(100).max(10_000).default(4_000),
 });
 export type Env = z.infer<typeof envSchema>;
 export function loadEnv(source: NodeJS.ProcessEnv = process.env): Env {

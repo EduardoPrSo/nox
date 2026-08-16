@@ -14,6 +14,7 @@ const packageNames = [
   'shared',
   'tools',
   'usage',
+  'voice',
 ];
 export default defineConfig({
   resolve: {

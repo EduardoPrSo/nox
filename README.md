@@ -1,6 +1,6 @@
 # NOX Core
 
-Fundação do backend de um agente pessoal multimodal, independente dos clientes e orientado a ferramentas. Este milestone implementa o fluxo texto → API → agente → OpenRouter → tool → permissão → resposta.
+Fundação do backend de um agente pessoal multimodal, independente dos clientes e orientado a ferramentas. O core suporta conversas persistentes por texto e o Voice MVP request/response com o mesmo runtime, memória, tools e confirmações.
 
 ## Decisões do MVP
 
@@ -23,6 +23,7 @@ packages/audit           eventos e sanitização
 packages/memory          portas e adapter simples
 packages/database        schema Drizzle/PostgreSQL
 packages/usage           observabilidade de IA e contratos de budget
+packages/voice           contratos STT/TTS, adapter OpenRouter e orquestração
 packages/identity        autenticação e contexto de identidade
 packages/automations     contrato futuro
 packages/shared          ambiente e utilitários
@@ -57,6 +58,8 @@ Confirme ou rejeite a resposta pendente:
 ```bash
 curl -X POST http://127.0.0.1:3000/v1/confirmations/ID -H "authorization: Bearer $NOX_API_TOKEN" -H "content-type: application/json" -H "x-session-id: 11111111-1111-4111-8111-111111111111" -d '{"approved":true}'
 ```
+
+Para voz, abra `http://127.0.0.1:3000/voice` (ou a URL HTTPS da VPS), informe o mesmo Bearer token e segure o botão para falar. A rota autenticada `POST /v1/voice` também aceita multipart com `audio` e `conversationId` opcional. Consulte [docs/voice.md](docs/voice.md) para contrato, formatos, privacidade e verificação real.
 
 ## Qualidade
 

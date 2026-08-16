@@ -11,6 +11,8 @@ const env: Env = {
   RUN_DATABASE_MIGRATIONS: false,
   OPENROUTER_API_KEY: 'test',
   OPENROUTER_MODEL: 'test',
+  MODEL_STT: 'test-stt',
+  MODEL_TTS: 'test-tts',
   OPENROUTER_BASE_URL: 'https://example.com',
   OPENROUTER_APP_NAME: 'NOX',
   NOX_API_TOKEN: 'test-token-with-at-least-32-characters',
@@ -19,6 +21,10 @@ const env: Env = {
   ACTION_TOOLS_AUTO_ALLOWED: false,
   CONFIRMATION_TTL_SECONDS: 300,
   CONVERSATION_CONTEXT_MESSAGES: 20,
+  VOICE_LANGUAGE: 'pt',
+  VOICE_TTS_VOICE: 'alloy',
+  VOICE_MAX_UPLOAD_BYTES: 2_000_000,
+  VOICE_MAX_TTS_CHARACTERS: 4_000,
 };
 const provider: AIProvider = {
   async chat() {

@@ -16,15 +16,23 @@ NOX_API_TOKEN=uma-chave-aleatoria-com-pelo-menos-32-caracteres
 NOX_USER_ID=owner
 NOX_DEVICE_ID=vps
 CONVERSATION_CONTEXT_MESSAGES=20
+MODEL_STT=openai/gpt-4o-mini-transcribe
+MODEL_TTS=hexgrad/kokoro-82m
+VOICE_LANGUAGE=pt
+VOICE_TTS_VOICE=pf_dora
+VOICE_MAX_UPLOAD_BYTES=2000000
+VOICE_MAX_TTS_CHARACTERS=4000
 ```
 
-`MODEL_DEFAULT` substitui gradualmente `OPENROUTER_MODEL`; enquanto não estiver definido, o valor antigo continua sendo usado. `MODEL_FAST`, `MODEL_REASONING`, `MODEL_CODING`, `MODEL_MEMORY`, `MODEL_VISION`, `MODEL_STT` e `MODEL_TTS` são opcionais. Capacidades de texto possuem fallbacks limitados; capacidades multimodais não configuradas ficam indisponíveis.
+`MODEL_DEFAULT` substitui gradualmente `OPENROUTER_MODEL`; enquanto não estiver definido, o valor antigo continua sendo usado. `MODEL_FAST`, `MODEL_REASONING`, `MODEL_CODING`, `MODEL_MEMORY` e `MODEL_VISION` são opcionais. `MODEL_STT` e `MODEL_TTS` possuem defaults explícitos e podem ser trocados independentemente. Capacidades multimodais não usam fallback silencioso para modelos de texto.
 
 O Compose fixa `NODE_ENV=production`, `HOST=0.0.0.0`, `PORT=3000`, `PERSISTENCE_DRIVER=postgres` e `RUN_DATABASE_MIGRATIONS=true`. As migrations rodam antes de a API escutar a porta.
 
-### Estratégia de migration do Milestone 3
+### Estratégia de migrations
 
 A migration `0001_redundant_husk.sql` é aditiva: cria `conversations`, `messages`, `ai_usage`, seus índices e adiciona `confirmations.conversation_id` como nullable. Não altera nem remove dados existentes. Por isso ela é compatível com o mecanismo atual de migration no startup. Antes do primeiro deploy, recomenda-se confirmar backup/PITR do Supabase e executar `pnpm db:migrate` manualmente; o startup continuará idempotente caso a migration já esteja aplicada.
+
+A migration `0002_brave_beyonder.sql` também é aditiva e acrescenta unidades faturáveis a `ai_usage` para segundos de STT e caracteres de TTS.
 
 ## Execução local
 

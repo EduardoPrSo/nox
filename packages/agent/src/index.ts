@@ -63,9 +63,10 @@ export class AgentRuntime {
       message: string;
       conversationId?: string;
       capability?: ModelCapability;
+      requestId?: string;
     },
   ): Promise<AgentResponse> {
-    const requestId = randomUUID();
+    const requestId = input.requestId ?? randomUUID();
     const conversation = input.conversationId
       ? await this.dependencies.memory.getConversation(input.conversationId, input.userId)
       : await this.dependencies.memory.createConversation({

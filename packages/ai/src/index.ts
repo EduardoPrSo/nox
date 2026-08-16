@@ -92,8 +92,6 @@ export type ChatResponse = {
 export interface AIProvider {
   chat(request: ChatRequest): Promise<ChatResponse>;
   stream(request: ChatRequest): AsyncIterable<string>;
-  transcribe?(audio: Uint8Array, mimeType: string): Promise<string>;
-  speak?(text: string): Promise<Uint8Array>;
 }
 
 type Options = {

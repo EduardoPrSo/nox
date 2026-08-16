@@ -26,7 +26,7 @@ O core persiste `audit_logs`, `confirmations`, `conversations`, `messages` e `ai
 
 Memórias poderão ganhar `metadata` e uma coluna `vector` via pgvector para FACT, PREFERENCE, EVENT, SUMMARY e OBSERVATION. Blobs de áudio, imagem e attachments irão para Supabase Storage privado; PostgreSQL guardará caminho e metadata. Auth poderá autenticar usuários, mas o provisionamento de dispositivos terá credenciais limitadas próprias. Realtime será um adapter de um futuro EventBus, jamais uma dependência do runtime.
 
-Cada chamada ao provider gera, em best-effort, uma linha de `ai_usage` por usuário, modelo, capability, dispositivo e conversa, incluindo tokens, custo informado pelo provider e latência. O runtime depende apenas do formato normalizado de `AIProvider`.
+Cada chamada ao provider gera, em best-effort, uma linha de `ai_usage` por usuário, modelo, capability, dispositivo e conversa, incluindo tokens, unidades faturáveis, custo informado pelo provider e latência. O runtime depende apenas do formato normalizado de `AIProvider`.
 
 ## Model Router
 
@@ -34,7 +34,15 @@ O backend escolhe uma capability (`FAST`, `DEFAULT`, `REASONING`, `CODING`, `VIS
 
 ## Multimodal e voz
 
-`AIMessage` aceita partes textuais e imagens. `AIProvider` reserva `transcribe` e `speak`; nenhuma rota de mídia foi exposta ainda. Isso preserva o contrato sem fingir que o pipeline já está pronto.
+Voz usa portas próprias `SpeechToTextProvider` e `TextToSpeechProvider`; o contrato de chat não mistura mídia. `VoiceService` resolve `STT` e `TTS` no mesmo `ModelRouter`, transcreve o upload, chama o `AgentRuntime` existente e sintetiza a resposta. As três etapas compartilham `requestId`, identidade e conversa. O transporte atual é request/response, mas as portas não dependem de HTTP nem de buffering e poderão receber adapters de streaming depois.
+
+```text
+multipart audio → STT → AgentRuntime → TTS → JSON + MP3 base64
+                         ↓
+              memória/tools/permissões/confirmações
+```
+
+O áudio bruto existe apenas em memória durante a requisição e não é gravado em banco ou filesystem. A transcrição entra na conversa como uma mensagem comum e, portanto, segue a persistência e retenção de texto. Detalhes operacionais estão em [voice.md](voice.md).
 
 ## Automações
 

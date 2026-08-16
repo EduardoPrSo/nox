@@ -15,6 +15,9 @@ export type AIUsageRecord = {
   outputTokens?: number;
   totalTokens?: number;
   cachedTokens?: number;
+  inputUnits?: string;
+  outputUnits?: string;
+  unit?: string;
   latencyMs?: number;
   estimatedCost?: string;
   createdAt: Date;
