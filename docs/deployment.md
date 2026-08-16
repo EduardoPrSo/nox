@@ -3,7 +3,7 @@
 ## Pré-requisitos
 
 - PostgreSQL/Supabase migrado e acessível pela VPS.
-- Docker Engine com Compose.
+- Docker Engine rootless com Compose para o usuário de deploy.
 - Um arquivo `/opt/nox/.env` legível somente pelo usuário de deploy.
 - A porta do container ligada somente a `127.0.0.1`; exposição pública deve passar por HTTPS no proxy reverso.
 
@@ -28,6 +28,8 @@ curl --fail http://127.0.0.1:3000/health
 ```
 
 O serviço usa filesystem somente leitura, remove capabilities Linux, impede privilege escalation e publica a API apenas em `127.0.0.1:3000`.
+
+Na VPS, o daemon Docker roda como serviço de usuário com `loginctl enable-linger`. Isso substitui `screen`: o daemon inicia no boot e o Compose aplica `restart: unless-stopped`, sem conceder ao usuário de CI acesso ao Docker root da máquina.
 
 ## CI/CD
 
