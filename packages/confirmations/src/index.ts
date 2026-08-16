@@ -3,6 +3,7 @@ export type PendingConfirmation = {
   id: string;
   userId: string;
   requestId: string;
+  conversationId?: string;
   toolCallId: string;
   toolName: string;
   arguments: unknown;

@@ -2,17 +2,27 @@ import Fastify, { type FastifyInstance } from 'fastify';
 import { z } from 'zod';
 import packageMetadata from '../../../package.json' with { type: 'json' };
 import { AgentRuntime } from '@nox/agent';
-import { OpenRouterProvider, type AIProvider } from '@nox/ai';
+import {
+  ConfiguredModelRouter,
+  OpenRouterProvider,
+  type AIProvider,
+  type ModelCapability,
+  type ModelRouter,
+} from '@nox/ai';
 import { InMemoryAuditRepository, type AuditRepository } from '@nox/audit';
 import { InMemoryConfirmationRepository, type ConfirmationRepository } from '@nox/confirmations';
 import { createPostgresRepositories } from '@nox/database';
 import { StaticTokenAuthenticator, type IdentityContext } from '@nox/identity';
-import { InMemoryMemoryStore, type MemoryStore } from '@nox/memory';
+import { ConversationNotFoundError, InMemoryMemoryStore, type MemoryStore } from '@nox/memory';
 import { DefaultPermissionEngine, type PermissionEngine } from '@nox/permissions';
 import type { Env } from '@nox/shared';
 import { ToolRegistry, createMockTools } from '@nox/tools';
+import { InMemoryAIUsageRepository, type AIUsageRepository } from '@nox/usage';
 
-const chatSchema = z.object({ message: z.string().min(1).max(20_000) });
+const chatSchema = z.object({
+  conversationId: z.string().uuid().optional(),
+  message: z.string().min(1).max(20_000),
+});
 const confirmationSchema = z.object({ approved: z.boolean() });
 type Overrides = {
   provider?: AIProvider;
@@ -20,6 +30,8 @@ type Overrides = {
   confirmations?: ConfirmationRepository;
   memory?: MemoryStore;
   permissions?: PermissionEngine;
+  router?: ModelRouter;
+  usage?: AIUsageRepository;
 };
 
 export function buildApp(env: Env, overrides: Overrides = {}): FastifyInstance {
@@ -42,11 +54,11 @@ export function buildApp(env: Env, overrides: Overrides = {}): FastifyInstance {
       overrides.provider ??
       new OpenRouterProvider({
         apiKey: env.OPENROUTER_API_KEY,
-        model: env.OPENROUTER_MODEL,
         baseUrl: env.OPENROUTER_BASE_URL,
         appName: env.OPENROUTER_APP_NAME,
         ...(env.OPENROUTER_SITE_URL ? { siteUrl: env.OPENROUTER_SITE_URL } : {}),
       }),
+    router: overrides.router ?? new ConfiguredModelRouter(modelConfiguration(env)),
     tools,
     permissions:
       overrides.permissions ??
@@ -56,8 +68,10 @@ export function buildApp(env: Env, overrides: Overrides = {}): FastifyInstance {
       postgresRepositories?.confirmations ??
       new InMemoryConfirmationRepository(ttlMs),
     audit: overrides.audit ?? postgresRepositories?.audit ?? new InMemoryAuditRepository(),
-    // TODO(Eko/Ambient Memory): use a PostgreSQL MemoryStore when persistence is enabled.
-    memory: overrides.memory ?? new InMemoryMemoryStore(),
+    memory: overrides.memory ?? postgresRepositories?.memory ?? new InMemoryMemoryStore(),
+    usage: overrides.usage ?? postgresRepositories?.usage ?? new InMemoryAIUsageRepository(),
+    contextMessageLimit: env.CONVERSATION_CONTEXT_MESSAGES,
+    onTelemetryError: (error) => app.log.error({ err: error }, 'Could not persist AI usage'),
   });
   app.get('/health', async () => ({
     status: 'ok',
@@ -85,10 +99,17 @@ export function buildApp(env: Env, overrides: Overrides = {}): FastifyInstance {
     const parsed = chatSchema.safeParse(request.body);
     if (!parsed.success)
       return reply.code(400).send({ error: 'INVALID_INPUT', details: parsed.error.issues });
-    return runtime.run({
-      ...identity,
-      message: parsed.data.message,
-    });
+    try {
+      return await runtime.run({
+        ...identity,
+        message: parsed.data.message,
+        ...(parsed.data.conversationId ? { conversationId: parsed.data.conversationId } : {}),
+      });
+    } catch (error) {
+      if (error instanceof ConversationNotFoundError)
+        return reply.code(404).send({ error: 'CONVERSATION_NOT_FOUND' });
+      throw error;
+    }
   });
   app.post('/v1/confirmations/:id', async (request, reply) => {
     const identity = identityFor(requestIdentities, request);
@@ -114,6 +135,22 @@ export function buildApp(env: Env, overrides: Overrides = {}): FastifyInstance {
       .send({ error: 'INTERNAL_ERROR', message: 'Não foi possível processar a solicitação.' });
   });
   return app;
+}
+
+function modelConfiguration(
+  env: Env,
+): Partial<Record<ModelCapability, string>> & { DEFAULT: string } {
+  const models: Partial<Record<ModelCapability, string>> & { DEFAULT: string } = {
+    DEFAULT: env.MODEL_DEFAULT ?? env.OPENROUTER_MODEL,
+  };
+  if (env.MODEL_FAST) models.FAST = env.MODEL_FAST;
+  if (env.MODEL_REASONING) models.REASONING = env.MODEL_REASONING;
+  if (env.MODEL_CODING) models.CODING = env.MODEL_CODING;
+  if (env.MODEL_VISION) models.VISION = env.MODEL_VISION;
+  if (env.MODEL_MEMORY) models.MEMORY = env.MODEL_MEMORY;
+  if (env.MODEL_STT) models.STT = env.MODEL_STT;
+  if (env.MODEL_TTS) models.TTS = env.MODEL_TTS;
+  return models;
 }
 function requireDatabaseUrl(value: string | undefined): string {
   if (!value) throw new Error('DATABASE_URL is required when PERSISTENCE_DRIVER=postgres');

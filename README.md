@@ -22,6 +22,7 @@ packages/confirmations   fluxo de aprovação vinculado
 packages/audit           eventos e sanitização
 packages/memory          portas e adapter simples
 packages/database        schema Drizzle/PostgreSQL
+packages/usage           observabilidade de IA e contratos de budget
 packages/identity        autenticação e contexto de identidade
 packages/automations     contrato futuro
 packages/shared          ambiente e utilitários
@@ -31,7 +32,7 @@ tests                    testes do runtime e API
 
 ## Executar
 
-> **Limitação atual:** `PERSISTENCE_DRIVER=postgres` persiste confirmações e auditoria, mas a memória de conversa ainda usa `InMemoryMemoryStore`. A persistência de memória em PostgreSQL faz parte do backlog imediato de Eko/Ambient Memory.
+Com `PERSISTENCE_DRIVER=postgres`, conversas, mensagens, confirmações, auditoria e uso de IA são persistidos no PostgreSQL. `PERSISTENCE_DRIVER=in-memory` mantém todos esses adapters locais para desenvolvimento e testes.
 
 Requer Node.js 22+ e pnpm.
 
@@ -48,6 +49,8 @@ O padrão é `PERSISTENCE_DRIVER=in-memory`. Para Supabase, use a connection str
 ```bash
 curl -X POST http://127.0.0.1:3000/v1/chat -H "authorization: Bearer $NOX_API_TOKEN" -H "content-type: application/json" -H "x-session-id: 11111111-1111-4111-8111-111111111111" -d '{"message":"Que horas são?"}'
 ```
+
+A primeira resposta contém `conversationId`. Envie esse UUID nas mensagens seguintes para continuar a mesma conversa. O servidor sempre valida ownership usando o usuário autenticado; `conversationId` e `sessionId` nunca concedem acesso.
 
 Confirme ou rejeite a resposta pendente:
 

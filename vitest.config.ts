@@ -13,6 +13,7 @@ const packageNames = [
   'permissions',
   'shared',
   'tools',
+  'usage',
 ];
 export default defineConfig({
   resolve: {

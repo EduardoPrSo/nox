@@ -1,5 +1,10 @@
 import { z } from 'zod';
 
+const optionalModel = z.preprocess(
+  (value) => (value === '' ? undefined : value),
+  z.string().min(1).optional(),
+);
+
 export const envSchema = z.object({
   NODE_ENV: z.enum(['development', 'test', 'production']).default('development'),
   HOST: z.string().default('127.0.0.1'),
@@ -14,6 +19,14 @@ export const envSchema = z.object({
   DATABASE_MIGRATIONS_PATH: z.string().optional(),
   OPENROUTER_API_KEY: z.string().min(1),
   OPENROUTER_MODEL: z.string().default('openai/gpt-4.1-mini'),
+  MODEL_DEFAULT: optionalModel,
+  MODEL_FAST: optionalModel,
+  MODEL_REASONING: optionalModel,
+  MODEL_CODING: optionalModel,
+  MODEL_VISION: optionalModel,
+  MODEL_MEMORY: optionalModel,
+  MODEL_STT: optionalModel,
+  MODEL_TTS: optionalModel,
   OPENROUTER_BASE_URL: z.string().url().default('https://openrouter.ai/api/v1'),
   OPENROUTER_SITE_URL: z.string().url().optional(),
   OPENROUTER_APP_NAME: z.string().default('NOX'),
@@ -25,6 +38,7 @@ export const envSchema = z.object({
     .default('false')
     .transform((v) => v === 'true'),
   CONFIRMATION_TTL_SECONDS: z.coerce.number().int().positive().default(300),
+  CONVERSATION_CONTEXT_MESSAGES: z.coerce.number().int().positive().max(100).default(20),
 });
 export type Env = z.infer<typeof envSchema>;
 export function loadEnv(source: NodeJS.ProcessEnv = process.env): Env {

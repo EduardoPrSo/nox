@@ -1,10 +1,16 @@
-import type { AIProvider, ChatRequest, ChatResponse } from '@nox/ai';
+import {
+  ConfiguredModelRouter,
+  type AIProvider,
+  type ChatRequest,
+  type ChatResponse,
+} from '@nox/ai';
 import { AgentRuntime } from '@nox/agent';
 import { InMemoryAuditRepository, sanitize } from '@nox/audit';
 import { InMemoryConfirmationRepository } from '@nox/confirmations';
 import { InMemoryMemoryStore } from '@nox/memory';
 import { DefaultPermissionEngine } from '@nox/permissions';
 import { ToolRegistry, createMockTools } from '@nox/tools';
+import { InMemoryAIUsageRepository, type AIUsageRepository } from '@nox/usage';
 
 class QueueProvider implements AIProvider {
   readonly requests: ChatRequest[] = [];
@@ -25,19 +31,36 @@ const identity = (userId = 'u1') => ({
   sessionId: '11111111-1111-4111-8111-111111111111',
 });
 
-function runtime(provider: AIProvider, allowActionTools = false) {
+function runtime(
+  provider: AIProvider,
+  allowActionTools = false,
+  options: {
+    memory?: InMemoryMemoryStore;
+    usage?: AIUsageRepository;
+    contextMessageLimit?: number;
+    onTelemetryError?: (error: unknown) => void;
+  } = {},
+) {
   const tools = new ToolRegistry();
   for (const tool of createMockTools(() => new Date('2026-08-15T12:00:00Z'))) tools.register(tool);
   const audit = new InMemoryAuditRepository();
+  const usage = options.usage ?? new InMemoryAIUsageRepository();
   return {
     audit,
+    usage,
     runtime: new AgentRuntime({
       provider,
+      router: new ConfiguredModelRouter({ DEFAULT: 'default-model', FAST: 'fast-model' }),
+      usage,
       tools,
       audit,
-      memory: new InMemoryMemoryStore(),
+      memory: options.memory ?? new InMemoryMemoryStore(),
       confirmations: new InMemoryConfirmationRepository(),
       permissions: new DefaultPermissionEngine({ allowActionTools }),
+      ...(options.contextMessageLimit !== undefined
+        ? { contextMessageLimit: options.contextMessageLimit }
+        : {}),
+      ...(options.onTelemetryError ? { onTelemetryError: options.onTelemetryError } : {}),
     }),
   };
 }
@@ -63,6 +86,7 @@ describe('AgentRuntime', () => {
     expect(provider.requests[0]?.messages[0]?.content).toContain(
       'Respond in Brazilian Portuguese by default',
     );
+    expect(provider.requests[0]?.model).toBe('default-model');
     expect(subject.audit.events.some((event) => event.type === 'tool_result')).toBe(true);
   });
 
@@ -93,13 +117,16 @@ describe('AgentRuntime', () => {
       description: 'Enviar para João: “Estou chegando.”',
     });
     if (pending.type !== 'confirmation_required') throw new Error('Expected confirmation');
-    await expect(
-      subject.runtime.confirm({
-        ...identity(),
-        confirmationId: pending.confirmationId,
-        approve: true,
-      }),
-    ).resolves.toMatchObject({ type: 'message', content: 'Mensagem enviada.' });
+    const approved = await subject.runtime.confirm({
+      ...identity(),
+      confirmationId: pending.confirmationId,
+      approve: true,
+    });
+    expect(approved).toMatchObject({
+      type: 'message',
+      content: 'Mensagem enviada.',
+      conversationId: pending.conversationId,
+    });
     await expect(
       subject.runtime.confirm({
         ...identity(),
@@ -150,6 +177,103 @@ describe('AgentRuntime', () => {
     await expect(
       runtime(provider, true).runtime.run({ ...identity(), message: 'Coloque em 99' }),
     ).resolves.toMatchObject({ type: 'message', content: 'Temperatura inválida.' });
+  });
+  it('keeps conversation history when the runtime is recreated and limits context', async () => {
+    const memory = new InMemoryMemoryStore();
+    const firstProvider = new QueueProvider([
+      { message: { role: 'assistant', content: 'Primeira resposta.' } },
+    ]);
+    const first = runtime(firstProvider, false, { memory });
+    const firstResponse = await first.runtime.run({ ...identity(), message: 'Primeira pergunta' });
+    if (firstResponse.type !== 'message') throw new Error('Expected message');
+
+    const secondProvider = new QueueProvider([
+      { message: { role: 'assistant', content: 'Segunda resposta.' } },
+    ]);
+    const second = runtime(secondProvider, false, { memory, contextMessageLimit: 2 });
+    await second.runtime.run({
+      ...identity(),
+      conversationId: firstResponse.conversationId,
+      message: 'Segunda pergunta',
+    });
+
+    expect(secondProvider.requests[0]?.messages.slice(1)).toEqual([
+      { role: 'user', content: 'Primeira pergunta' },
+      { role: 'assistant', content: 'Primeira resposta.' },
+      { role: 'user', content: 'Segunda pergunta' },
+    ]);
+  });
+
+  it('does not fail a valid response when usage persistence fails', async () => {
+    const telemetryErrors: unknown[] = [];
+    const failingUsage: AIUsageRepository = {
+      async record() {
+        throw new Error('usage unavailable');
+      },
+    };
+    const provider = new QueueProvider([
+      {
+        message: { role: 'assistant', content: 'Resposta preservada.' },
+        usage: {
+          provider: 'openrouter',
+          model: 'resolved-model',
+          inputTokens: 10,
+          outputTokens: 3,
+          totalTokens: 13,
+          latencyMs: 25,
+          cost: '0.000012',
+        },
+      },
+    ]);
+    const subject = runtime(provider, false, {
+      usage: failingUsage,
+      onTelemetryError: (error) => telemetryErrors.push(error),
+    });
+
+    await expect(subject.runtime.run({ ...identity(), message: 'Oi' })).resolves.toMatchObject({
+      type: 'message',
+      content: 'Resposta preservada.',
+    });
+    expect(telemetryErrors).toHaveLength(1);
+  });
+
+  it('records normalized usage with identity, conversation and capability', async () => {
+    const usage = new InMemoryAIUsageRepository();
+    const provider = new QueueProvider([
+      {
+        message: { role: 'assistant', content: 'Feito.' },
+        usage: {
+          provider: 'openrouter',
+          model: 'resolved-model',
+          inputTokens: 8,
+          outputTokens: 2,
+          totalTokens: 10,
+          cachedTokens: 4,
+          latencyMs: 18,
+          cost: '0.000010',
+        },
+      },
+    ]);
+    const subject = runtime(provider, false, { usage });
+    const response = await subject.runtime.run({ ...identity(), message: 'Registre' });
+    if (response.type !== 'message') throw new Error('Expected message');
+
+    expect(usage.records).toHaveLength(1);
+    expect(usage.records[0]).toMatchObject({
+      userId: 'u1',
+      deviceId: 'test-device',
+      sessionId: identity().sessionId,
+      conversationId: response.conversationId,
+      provider: 'openrouter',
+      model: 'resolved-model',
+      capability: 'DEFAULT',
+      inputTokens: 8,
+      outputTokens: 2,
+      totalTokens: 10,
+      cachedTokens: 4,
+      latencyMs: 18,
+      estimatedCost: '0.000010',
+    });
   });
 });
 

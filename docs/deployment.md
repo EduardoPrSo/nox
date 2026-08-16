@@ -15,9 +15,16 @@ OPENROUTER_API_KEY=...
 NOX_API_TOKEN=uma-chave-aleatoria-com-pelo-menos-32-caracteres
 NOX_USER_ID=owner
 NOX_DEVICE_ID=vps
+CONVERSATION_CONTEXT_MESSAGES=20
 ```
 
+`MODEL_DEFAULT` substitui gradualmente `OPENROUTER_MODEL`; enquanto não estiver definido, o valor antigo continua sendo usado. `MODEL_FAST`, `MODEL_REASONING`, `MODEL_CODING`, `MODEL_MEMORY`, `MODEL_VISION`, `MODEL_STT` e `MODEL_TTS` são opcionais. Capacidades de texto possuem fallbacks limitados; capacidades multimodais não configuradas ficam indisponíveis.
+
 O Compose fixa `NODE_ENV=production`, `HOST=0.0.0.0`, `PORT=3000`, `PERSISTENCE_DRIVER=postgres` e `RUN_DATABASE_MIGRATIONS=true`. As migrations rodam antes de a API escutar a porta.
+
+### Estratégia de migration do Milestone 3
+
+A migration `0001_redundant_husk.sql` é aditiva: cria `conversations`, `messages`, `ai_usage`, seus índices e adiciona `confirmations.conversation_id` como nullable. Não altera nem remove dados existentes. Por isso ela é compatível com o mecanismo atual de migration no startup. Antes do primeiro deploy, recomenda-se confirmar backup/PITR do Supabase e executar `pnpm db:migrate` manualmente; o startup continuará idempotente caso a migration já esteja aplicada.
 
 ## Execução local
 
