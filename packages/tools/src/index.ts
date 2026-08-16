@@ -1,7 +1,8 @@
 import { z } from 'zod';
+import type { IdentityContext } from '@nox/identity';
 import type { PermissionLevel } from '@nox/permissions';
 
-export type ToolContext = { userId: string; requestId: string; signal: AbortSignal };
+export type ToolContext = IdentityContext & { requestId: string; signal: AbortSignal };
 export type ToolResult = { success: true; data: unknown } | { success: false; error: string };
 export interface ToolDefinition<TSchema extends z.ZodType = z.ZodType> {
   name: string;

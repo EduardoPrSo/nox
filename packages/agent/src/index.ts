@@ -4,6 +4,7 @@ import type { AIMessage, AIProvider, ToolCall } from '@nox/ai';
 import type { AuditRepository } from '@nox/audit';
 import type { ConfirmationRepository } from '@nox/confirmations';
 import { hashArguments } from '@nox/confirmations';
+import type { IdentityContext } from '@nox/identity';
 import type { MemoryStore } from '@nox/memory';
 import type { PermissionEngine } from '@nox/permissions';
 import type { ToolDefinition, ToolRegistry, ToolResult } from '@nox/tools';
@@ -42,9 +43,9 @@ export class AgentRuntime {
     },
   ) {}
 
-  async run(input: { userId: string; message: string }): Promise<AgentResponse> {
+  async run(input: IdentityContext & { message: string }): Promise<AgentResponse> {
     const requestId = randomUUID();
-    await this.log(requestId, input.userId, 'request', { message: input.message });
+    await this.log(requestId, input, 'request', { message: input.message });
     const history = await this.dependencies.memory.getConversationContext(input.userId, 12);
     const userMessage: AIMessage = { role: 'user', content: input.message };
     const messages: AIMessage[] = [
@@ -66,11 +67,11 @@ export class AgentRuntime {
             userMessage,
             { role: 'assistant', content },
           ]);
-          await this.log(requestId, input.userId, 'response', { content });
+          await this.log(requestId, input, 'response', { content });
           return { type: 'message', content, requestId };
         }
         for (const call of calls) {
-          const outcome = await this.handleToolCall({ call, userId: input.userId, requestId });
+          const outcome = await this.handleToolCall({ call, identity: input, requestId });
           if (outcome.type === 'confirmation_required') return outcome;
           messages.push({
             role: 'tool',
@@ -81,16 +82,17 @@ export class AgentRuntime {
       }
       throw new Error('Agent exceeded the maximum number of tool iterations');
     } catch (error) {
-      await this.log(requestId, input.userId, 'error', { message: errorMessage(error) });
+      await this.log(requestId, input, 'error', { message: errorMessage(error) });
       throw error;
     }
   }
 
-  async confirm(input: {
-    userId: string;
-    confirmationId: string;
-    approve: boolean;
-  }): Promise<ConfirmationResponse> {
+  async confirm(
+    input: IdentityContext & {
+      confirmationId: string;
+      approve: boolean;
+    },
+  ): Promise<ConfirmationResponse> {
     const pending = await this.dependencies.confirmations.resolve(
       input.confirmationId,
       input.userId,
@@ -102,7 +104,7 @@ export class AgentRuntime {
         code: 'NOT_FOUND',
         message: 'Confirmação não encontrada ou já resolvida.',
       };
-    await this.log(pending.requestId, input.userId, 'confirmation_resolved', {
+    await this.log(pending.requestId, input, 'confirmation_resolved', {
       confirmationId: pending.id,
       status: pending.status,
     });
@@ -126,7 +128,7 @@ export class AgentRuntime {
         code: 'INVALID',
         message: 'Os argumentos da ferramenta não são mais válidos.',
       };
-    const result = await this.executeTool(tool, parsed.data, input.userId, pending.requestId);
+    const result = await this.executeTool(tool, parsed.data, input, pending.requestId);
     const assistant: AIMessage = {
       role: 'assistant',
       content: '',
@@ -146,20 +148,20 @@ export class AgentRuntime {
     await this.dependencies.memory.appendConversation(input.userId, [
       { role: 'assistant', content },
     ]);
-    await this.log(pending.requestId, input.userId, 'response', { content });
+    await this.log(pending.requestId, input, 'response', { content });
     return { type: 'message', content, requestId: pending.requestId };
   }
 
   private async handleToolCall(input: {
     call: ToolCall;
-    userId: string;
+    identity: IdentityContext;
     requestId: string;
   }): Promise<
     | { type: 'result'; result: ToolResult }
     | Extract<AgentResponse, { type: 'confirmation_required' }>
   > {
-    const { call, userId, requestId } = input;
-    await this.log(requestId, userId, 'tool_requested', {
+    const { call, identity, requestId } = input;
+    await this.log(requestId, identity, 'tool_requested', {
       tool: call.name,
       arguments: call.arguments,
     });
@@ -173,11 +175,11 @@ export class AgentRuntime {
         result: { success: false, error: `Invalid tool input: ${z.prettifyError(parsed.error)}` },
       };
     const decision = await this.dependencies.permissions.evaluate({
-      userId,
+      ...identity,
       toolName: tool.name,
       level: tool.permission,
     });
-    await this.log(requestId, userId, 'permission', {
+    await this.log(requestId, identity, 'permission', {
       tool: tool.name,
       level: tool.permission,
       decision,
@@ -186,14 +188,14 @@ export class AgentRuntime {
       return { type: 'result', result: { success: false, error: 'Permission denied' } };
     if (decision === 'REQUIRE_CONFIRMATION') {
       const pending = await this.dependencies.confirmations.create({
-        userId,
+        userId: identity.userId,
         requestId,
         toolCallId: call.id,
         toolName: tool.name,
         arguments: parsed.data,
         description: tool.confirmationDescription?.(parsed.data) ?? `Executar ${tool.name}`,
       });
-      await this.log(requestId, userId, 'confirmation_created', {
+      await this.log(requestId, identity, 'confirmation_created', {
         confirmationId: pending.id,
         tool: tool.name,
         argumentsHash: pending.argumentsHash,
@@ -207,36 +209,53 @@ export class AgentRuntime {
         requestId,
       };
     }
-    return { type: 'result', result: await this.executeTool(tool, parsed.data, userId, requestId) };
+    return {
+      type: 'result',
+      result: await this.executeTool(tool, parsed.data, identity, requestId),
+    };
   }
 
   private async executeTool(
     tool: ToolDefinition,
     args: unknown,
-    userId: string,
+    identity: IdentityContext,
     requestId: string,
   ): Promise<ToolResult> {
     const started = performance.now();
     const controller = new AbortController();
     const timer = setTimeout(() => controller.abort(), this.dependencies.toolTimeoutMs ?? 10_000);
     try {
-      const result = await tool.execute(args, { userId, requestId, signal: controller.signal });
+      const result = await tool.execute(args, {
+        ...identity,
+        requestId,
+        signal: controller.signal,
+      });
       await this.dependencies.audit.log({
         requestId,
-        userId,
+        userId: identity.userId,
         type: 'tool_result',
         durationMs: Math.round(performance.now() - started),
-        data: { tool: tool.name, result },
+        data: {
+          deviceId: identity.deviceId,
+          sessionId: identity.sessionId,
+          tool: tool.name,
+          result,
+        },
       });
       return result;
     } catch (error) {
       const result: ToolResult = { success: false, error: errorMessage(error) };
       await this.dependencies.audit.log({
         requestId,
-        userId,
+        userId: identity.userId,
         type: 'tool_result',
         durationMs: Math.round(performance.now() - started),
-        data: { tool: tool.name, result },
+        data: {
+          deviceId: identity.deviceId,
+          sessionId: identity.sessionId,
+          tool: tool.name,
+          result,
+        },
       });
       return result;
     } finally {
@@ -253,10 +272,15 @@ export class AgentRuntime {
   }
   private async log(
     requestId: string,
-    userId: string,
+    identity: IdentityContext,
     type: Parameters<AuditRepository['log']>[0]['type'],
     data: unknown,
   ) {
-    await this.dependencies.audit.log({ requestId, userId, type, data });
+    await this.dependencies.audit.log({
+      requestId,
+      userId: identity.userId,
+      type,
+      data: { deviceId: identity.deviceId, sessionId: identity.sessionId, payload: data },
+    });
   }
 }

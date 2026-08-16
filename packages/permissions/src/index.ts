@@ -1,7 +1,7 @@
 export const permissionLevels = ['READ', 'ACTION', 'EXTERNAL'] as const;
 export type PermissionLevel = (typeof permissionLevels)[number];
 export type PermissionDecision = 'ALLOW' | 'DENY' | 'REQUIRE_CONFIRMATION';
-export type PermissionContext = { userId: string; toolName: string; level: PermissionLevel };
+export type PermissionContext = IdentityContext & { toolName: string; level: PermissionLevel };
 export interface PermissionEngine {
   evaluate(context: PermissionContext): Promise<PermissionDecision>;
 }
@@ -18,3 +18,4 @@ export class DefaultPermissionEngine implements PermissionEngine {
     return 'REQUIRE_CONFIRMATION';
   }
 }
+import type { IdentityContext } from '@nox/identity';

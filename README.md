@@ -22,6 +22,7 @@ packages/confirmations   fluxo de aprovação vinculado
 packages/audit           eventos e sanitização
 packages/memory          portas e adapter simples
 packages/database        schema Drizzle/PostgreSQL
+packages/identity        autenticação e contexto de identidade
 packages/automations     contrato futuro
 packages/shared          ambiente e utilitários
 docs                     arquitetura, segurança, tools e pendant
@@ -40,18 +41,18 @@ cp .env.example .env
 pnpm dev
 ```
 
-Preencha `OPENROUTER_API_KEY`. Para permitir tools ACTION sem confirmação, defina `ACTION_TOOLS_AUTO_ALLOWED=true`. EXTERNAL continua exigindo confirmação.
+Preencha `OPENROUTER_API_KEY` e gere um `NOX_API_TOKEN` aleatório com pelo menos 32 caracteres. Para permitir tools ACTION sem confirmação, defina `ACTION_TOOLS_AUTO_ALLOWED=true`. EXTERNAL continua exigindo confirmação.
 
 O padrão é `PERSISTENCE_DRIVER=in-memory`. Para Supabase, use a connection string PostgreSQL do projeto em `DATABASE_URL`, defina `PERSISTENCE_DRIVER=postgres` e aplique `pnpm db:migrate`. O backend não usa nem precisa do SDK Supabase neste milestone.
 
 ```bash
-curl -X POST http://127.0.0.1:3000/v1/chat -H "content-type: application/json" -H "x-user-id: local-user" -d '{"message":"Que horas são?"}'
+curl -X POST http://127.0.0.1:3000/v1/chat -H "authorization: Bearer $NOX_API_TOKEN" -H "content-type: application/json" -H "x-session-id: 11111111-1111-4111-8111-111111111111" -d '{"message":"Que horas são?"}'
 ```
 
 Confirme ou rejeite a resposta pendente:
 
 ```bash
-curl -X POST http://127.0.0.1:3000/v1/confirmations/ID -H "content-type: application/json" -H "x-user-id: local-user" -d '{"approved":true}'
+curl -X POST http://127.0.0.1:3000/v1/confirmations/ID -H "authorization: Bearer $NOX_API_TOKEN" -H "content-type: application/json" -H "x-session-id: 11111111-1111-4111-8111-111111111111" -d '{"approved":true}'
 ```
 
 ## Qualidade
@@ -63,4 +64,6 @@ pnpm test
 pnpm build
 ```
 
-O header `x-user-id` é apenas uma identidade local provisória. Antes de exposição em rede, substitua-o por autenticação real e use adapters PostgreSQL para confirmações, auditoria e memória.
+As rotas `/v1/*` exigem Bearer token. `userId` e `deviceId` vêm da configuração autenticada do servidor; `sessionId` é validado ou gerado pela API e devolvido no header `x-session-id`.
+
+Para executar com Docker ou operar deploy/rollback na VPS, consulte [docs/deployment.md](docs/deployment.md).

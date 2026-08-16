@@ -8,6 +8,7 @@ const packageNames = [
   'automations',
   'confirmations',
   'database',
+  'identity',
   'memory',
   'permissions',
   'shared',

@@ -19,6 +19,12 @@ class QueueProvider implements AIProvider {
     yield '';
   }
 }
+const identity = (userId = 'u1') => ({
+  userId,
+  deviceId: 'test-device',
+  sessionId: '11111111-1111-4111-8111-111111111111',
+});
+
 function runtime(provider: AIProvider, allowActionTools = false) {
   const tools = new ToolRegistry();
   for (const tool of createMockTools(() => new Date('2026-08-15T12:00:00Z'))) tools.register(tool);
@@ -50,7 +56,7 @@ describe('AgentRuntime', () => {
     ]);
     const subject = runtime(provider);
     await expect(
-      subject.runtime.run({ userId: 'u1', message: 'Que horas são?' }),
+      subject.runtime.run({ ...identity(), message: 'Que horas são?' }),
     ).resolves.toMatchObject({ type: 'message', content: 'São 12:00 UTC.' });
     expect(provider.requests[0]?.messages[0]?.role).toBe('system');
     expect(provider.requests[0]?.messages[0]?.content).toContain('You are NOX');
@@ -79,7 +85,7 @@ describe('AgentRuntime', () => {
     ]);
     const subject = runtime(provider);
     const pending = await subject.runtime.run({
-      userId: 'u1',
+      ...identity(),
       message: 'Mande mensagem para João',
     });
     expect(pending).toMatchObject({
@@ -89,14 +95,14 @@ describe('AgentRuntime', () => {
     if (pending.type !== 'confirmation_required') throw new Error('Expected confirmation');
     await expect(
       subject.runtime.confirm({
-        userId: 'u1',
+        ...identity(),
         confirmationId: pending.confirmationId,
         approve: true,
       }),
     ).resolves.toMatchObject({ type: 'message', content: 'Mensagem enviada.' });
     await expect(
       subject.runtime.confirm({
-        userId: 'u1',
+        ...identity(),
         confirmationId: pending.confirmationId,
         approve: true,
       }),
@@ -114,11 +120,14 @@ describe('AgentRuntime', () => {
       },
     ]);
     const subject = runtime(provider);
-    const pending = await subject.runtime.run({ userId: 'owner', message: 'Coloque em 23' });
+    const pending = await subject.runtime.run({
+      ...identity('owner'),
+      message: 'Coloque em 23',
+    });
     if (pending.type !== 'confirmation_required') throw new Error('Expected confirmation');
     await expect(
       subject.runtime.confirm({
-        userId: 'attacker',
+        ...identity('attacker'),
         confirmationId: pending.confirmationId,
         approve: true,
       }),
@@ -139,7 +148,7 @@ describe('AgentRuntime', () => {
       { message: { role: 'assistant', content: 'Temperatura inválida.' } },
     ]);
     await expect(
-      runtime(provider, true).runtime.run({ userId: 'u1', message: 'Coloque em 99' }),
+      runtime(provider, true).runtime.run({ ...identity(), message: 'Coloque em 99' }),
     ).resolves.toMatchObject({ type: 'message', content: 'Temperatura inválida.' });
   });
 });

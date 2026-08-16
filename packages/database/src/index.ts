@@ -1,5 +1,7 @@
+import { fileURLToPath } from 'node:url';
 import { and, eq } from 'drizzle-orm';
 import { drizzle } from 'drizzle-orm/postgres-js';
+import { migrate } from 'drizzle-orm/postgres-js/migrator';
 import { integer, jsonb, pgEnum, pgTable, text, timestamp, uuid } from 'drizzle-orm/pg-core';
 import postgres from 'postgres';
 import type { AuditRepository } from '@nox/audit';
@@ -105,6 +107,18 @@ export function createPostgresRepositories(databaseUrl: string, confirmationTtlM
     confirmations: new DrizzleConfirmationRepository(db, confirmationTtlMs),
     close: async () => client.end(),
   };
+}
+
+export async function migratePostgres(
+  databaseUrl: string,
+  migrationsFolder = fileURLToPath(new URL('../drizzle', import.meta.url)),
+): Promise<void> {
+  const client = postgres(databaseUrl, { prepare: false, max: 1 });
+  try {
+    await migrate(drizzle(client), { migrationsFolder });
+  } finally {
+    await client.end();
+  }
 }
 function mapConfirmation(row: typeof confirmations.$inferSelect): PendingConfirmation {
   return {

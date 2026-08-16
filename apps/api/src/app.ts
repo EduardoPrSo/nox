@@ -6,6 +6,7 @@ import { OpenRouterProvider, type AIProvider } from '@nox/ai';
 import { InMemoryAuditRepository, type AuditRepository } from '@nox/audit';
 import { InMemoryConfirmationRepository, type ConfirmationRepository } from '@nox/confirmations';
 import { createPostgresRepositories } from '@nox/database';
+import { StaticTokenAuthenticator, type IdentityContext } from '@nox/identity';
 import { InMemoryMemoryStore, type MemoryStore } from '@nox/memory';
 import { DefaultPermissionEngine, type PermissionEngine } from '@nox/permissions';
 import type { Env } from '@nox/shared';
@@ -23,6 +24,11 @@ type Overrides = {
 
 export function buildApp(env: Env, overrides: Overrides = {}): FastifyInstance {
   const app = Fastify({ logger: env.NODE_ENV !== 'test' });
+  const authenticator = new StaticTokenAuthenticator(env.NOX_API_TOKEN, {
+    userId: env.NOX_USER_ID,
+    deviceId: env.NOX_DEVICE_ID,
+  });
+  const requestIdentities = new WeakMap<object, IdentityContext>();
   const tools = new ToolRegistry();
   for (const tool of createMockTools()) tools.register(tool);
   const ttlMs = env.CONFIRMATION_TTL_SECONDS * 1000;
@@ -54,21 +60,41 @@ export function buildApp(env: Env, overrides: Overrides = {}): FastifyInstance {
     memory: overrides.memory ?? new InMemoryMemoryStore(),
   });
   app.get('/health', async () => ({ status: 'ok', version: packageMetadata.version }));
+  app.addHook('onRequest', async (request, reply) => {
+    if (!request.url.startsWith('/v1/')) return;
+    const sessionHeader = request.headers['x-session-id'];
+    const result = authenticator.authenticate(
+      request.headers.authorization,
+      Array.isArray(sessionHeader) ? sessionHeader[0] : sessionHeader,
+    );
+    if (!result.authenticated) {
+      const invalidSession = result.reason === 'INVALID_SESSION';
+      await reply
+        .code(invalidSession ? 400 : 401)
+        .send({ error: invalidSession ? 'INVALID_SESSION' : 'UNAUTHORIZED' });
+      return;
+    }
+    requestIdentities.set(request, result.identity);
+  });
   app.post('/v1/chat', async (request, reply) => {
+    const identity = identityFor(requestIdentities, request);
+    void reply.header('x-session-id', identity.sessionId);
     const parsed = chatSchema.safeParse(request.body);
     if (!parsed.success)
       return reply.code(400).send({ error: 'INVALID_INPUT', details: parsed.error.issues });
     return runtime.run({
-      userId: userId(request.headers['x-user-id']),
+      ...identity,
       message: parsed.data.message,
     });
   });
   app.post('/v1/confirmations/:id', async (request, reply) => {
+    const identity = identityFor(requestIdentities, request);
+    void reply.header('x-session-id', identity.sessionId);
     const params = z.object({ id: z.string().uuid() }).safeParse(request.params);
     const body = confirmationSchema.safeParse(request.body);
     if (!params.success || !body.success) return reply.code(400).send({ error: 'INVALID_INPUT' });
     const result = await runtime.confirm({
-      userId: userId(request.headers['x-user-id']),
+      ...identity,
       confirmationId: params.data.id,
       approve: body.data.approved,
     });
@@ -86,11 +112,16 @@ export function buildApp(env: Env, overrides: Overrides = {}): FastifyInstance {
   });
   return app;
 }
-function userId(header: string | string[] | undefined): string {
-  const value = Array.isArray(header) ? header[0] : header;
-  return value?.slice(0, 128) || 'local-user';
-}
 function requireDatabaseUrl(value: string | undefined): string {
   if (!value) throw new Error('DATABASE_URL is required when PERSISTENCE_DRIVER=postgres');
   return value;
+}
+
+function identityFor(
+  identities: WeakMap<object, IdentityContext>,
+  request: object,
+): IdentityContext {
+  const identity = identities.get(request);
+  if (!identity) throw new Error('Authenticated identity is missing');
+  return identity;
 }
