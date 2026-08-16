@@ -4,6 +4,7 @@ export const envSchema = z.object({
   NODE_ENV: z.enum(['development', 'test', 'production']).default('development'),
   HOST: z.string().default('127.0.0.1'),
   PORT: z.coerce.number().int().positive().default(3000),
+  APP_VERSION: z.string().min(1).optional(),
   DATABASE_URL: z.string().url().optional(),
   PERSISTENCE_DRIVER: z.enum(['in-memory', 'postgres']).default('in-memory'),
   RUN_DATABASE_MIGRATIONS: z

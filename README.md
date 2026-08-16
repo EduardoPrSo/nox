@@ -62,6 +62,7 @@ pnpm typecheck
 pnpm lint
 pnpm test
 pnpm build
+pnpm format:check
 ```
 
 As rotas `/v1/*` exigem Bearer token. `userId` e `deviceId` vêm da configuração autenticada do servidor; `sessionId` é validado ou gerado pela API e devolvido no header `x-session-id`.

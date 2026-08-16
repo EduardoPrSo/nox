@@ -33,7 +33,7 @@ Na VPS, o daemon Docker roda como serviço de usuário com `loginctl enable-ling
 
 ## CI/CD
 
-Pull requests executam typecheck, lint, testes e build. Pushes na `main` publicam duas tags no GHCR:
+Pull requests executam typecheck, lint, testes, build e verificação de formatação. Pushes na `main` repetem essas validações e publicam duas tags no GHCR:
 
 - `sha-<commit>`: tag imutável usada no deploy;
 - `latest`: conveniência, nunca usada como referência de rollback.
@@ -47,12 +47,26 @@ O environment `production` do GitHub precisa destes secrets:
 
 O deploy atualiza o checkout da VPS para o SHA exato, baixa a imagem, inicia o container e aguarda `/health`. Se o healthcheck falhar, `scripts/deploy.sh` restaura a imagem anterior automaticamente.
 
+O SHA do commit é gravado em `APP_VERSION` durante o build. O deploy só conclui quando `https://dudunox.duckdns.org/health` responde `200` e informa exatamente esse SHA. O rollback automático também confirma que a imagem anterior voltou a responder antes de encerrar.
+
+## Fluxo de PR e proteção da main
+
+- Mudanças normais entram por pull request.
+- O CI precisa passar antes do merge.
+- O merge é uma decisão humana; automações podem criar branch, implementar, testar e abrir PR, mas não fazem auto-merge.
+- Somente um push já integrado à `main` publica e implanta uma imagem.
+- Agentes não alteram branch protection, secrets, aprovações do environment nem autorizam o próprio deploy.
+
+No GitHub, recomenda-se proteger `main`, exigir o check `CI / validate`, exigir pull request e bloquear force pushes. O environment `production` pode exigir aprovação humana caso se deseje uma segunda barreira antes do deploy.
+
 Rollback manual:
 
 ```bash
 cd /opt/nox
 bash scripts/rollback.sh
 ```
+
+O rollback manual sobe a imagem registrada em `.previous-image`, espera o healthcheck local e troca os registros de imagem atual/anterior, permitindo desfazer o rollback com o mesmo comando se necessário.
 
 ## Validação de persistência
 

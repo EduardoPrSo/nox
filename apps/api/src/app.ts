@@ -59,7 +59,10 @@ export function buildApp(env: Env, overrides: Overrides = {}): FastifyInstance {
     // TODO(Eko/Ambient Memory): use a PostgreSQL MemoryStore when persistence is enabled.
     memory: overrides.memory ?? new InMemoryMemoryStore(),
   });
-  app.get('/health', async () => ({ status: 'ok', version: packageMetadata.version }));
+  app.get('/health', async () => ({
+    status: 'ok',
+    version: env.APP_VERSION ?? packageMetadata.version,
+  }));
   app.addHook('onRequest', async (request, reply) => {
     if (!request.url.startsWith('/v1/')) return;
     const sessionHeader = request.headers['x-session-id'];

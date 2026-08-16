@@ -5,10 +5,25 @@ set -Eeuo pipefail
 
 readonly APP_DIR="${APP_DIR:-/opt/nox}"
 readonly HEALTH_URL="${HEALTH_URL:-http://127.0.0.1:3000/health}"
+readonly EXPECTED_VERSION="${EXPECTED_VERSION:-}"
 readonly COMPOSE=(docker compose --project-directory "$APP_DIR" --env-file "$APP_DIR/.env" -f "$APP_DIR/docker-compose.yml")
 
 cd "$APP_DIR"
 previous_image="$(docker inspect --format '{{.Config.Image}}' nox 2>/dev/null || true)"
+
+wait_for_health() {
+  local expected_version="${1:-}"
+  local response
+  for _ in $(seq 1 30); do
+    if response="$(curl --fail --silent --show-error "$HEALTH_URL" 2>/dev/null)"; then
+      if [[ -z "$expected_version" ]] || grep -Fq "\"version\":\"$expected_version\"" <<<"$response"; then
+        return 0
+      fi
+    fi
+    sleep 2
+  done
+  return 1
+}
 
 rollback() {
   if [[ -z "$previous_image" ]]; then
@@ -17,8 +32,12 @@ rollback() {
   fi
   echo "Healthcheck failed; rolling back to $previous_image" >&2
   NOX_IMAGE="$previous_image" "${COMPOSE[@]}" up -d --no-build nox
+  if ! wait_for_health; then
+    echo "Rollback started, but the previous image did not become healthy." >&2
+    return 1
+  fi
+  echo "Rollback restored $previous_image" >&2
 }
-trap rollback ERR
 
 pulled=false
 for attempt in 1 2 3; do
@@ -34,18 +53,10 @@ if [[ "$pulled" != true ]]; then
   false
 fi
 
+trap rollback ERR
 NOX_IMAGE="$NOX_IMAGE" "${COMPOSE[@]}" up -d --no-build --remove-orphans nox
 
-healthy=false
-for _ in $(seq 1 30); do
-  if curl --fail --silent --show-error "$HEALTH_URL" >/dev/null; then
-    healthy=true
-    break
-  fi
-  sleep 2
-done
-
-if [[ "$healthy" != true ]]; then
+if ! wait_for_health "$EXPECTED_VERSION"; then
   docker logs --tail 100 nox >&2 || true
   false
 fi

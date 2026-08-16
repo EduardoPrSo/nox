@@ -34,6 +34,7 @@ jobs:
       - run: pnpm lint
       - run: pnpm test
       - run: pnpm build
+      - run: pnpm format:check
 
   image:
     needs: validate
@@ -53,6 +54,8 @@ jobs:
           context: .
           push: true
           platforms: linux/amd64
+          build-args: |
+            APP_VERSION=${{ github.sha }}
           tags: |
             ${{ env.IMAGE_NAME }}:sha-${{ github.sha }}
             ${{ env.IMAGE_NAME }}:latest
@@ -93,4 +96,4 @@ jobs:
         run: |
           ssh -o ServerAliveInterval=30 -o ServerAliveCountMax=20 \
             -i ~/.ssh/nox_deploy "$VPS_USER@$VPS_HOST" \
-            "cd /opt/nox && git fetch origin main && git checkout --detach '$GITHUB_SHA' && NOX_IMAGE='$DEPLOY_IMAGE' bash scripts/deploy.sh"
+            "cd /opt/nox && git fetch origin main && git checkout --detach '$GITHUB_SHA' && NOX_IMAGE='$DEPLOY_IMAGE' EXPECTED_VERSION='$GITHUB_SHA' HEALTH_URL='https://dudunox.duckdns.org/health' bash scripts/deploy.sh"
