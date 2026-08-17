@@ -165,4 +165,34 @@ describe('OpenRouterProvider', () => {
       message: 'messages.9.content: Invalid input',
     });
   });
+
+  it('sends strict JSON Schema and privacy-aware provider routing for classifiers', async () => {
+    let body: Record<string, unknown> | undefined;
+    vi.stubGlobal(
+      'fetch',
+      vi.fn(async (_url: string | URL | Request, init?: RequestInit) => {
+        if (typeof init?.body !== 'string') throw new Error('Expected JSON body');
+        body = JSON.parse(init.body) as Record<string, unknown>;
+        return new Response(
+          JSON.stringify({ choices: [{ message: { content: '{"decision":"DISCARD"}' } }] }),
+          { status: 200, headers: { 'content-type': 'application/json' } },
+        );
+      }),
+    );
+    await new OpenRouterProvider({ apiKey: 'secret' }).chat({
+      model: 'luna',
+      messages: [{ role: 'user', content: 'classifique' }],
+      responseSchema: {
+        name: 'classification',
+        schema: { type: 'object', properties: { decision: { type: 'string' } } },
+      },
+    });
+    expect(body).toMatchObject({
+      response_format: {
+        type: 'json_schema',
+        json_schema: { name: 'classification', strict: true },
+      },
+      provider: { require_parameters: true, data_collection: 'deny' },
+    });
+  });
 });

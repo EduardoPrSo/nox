@@ -16,12 +16,14 @@ Fundação do backend de um agente pessoal multimodal, independente dos clientes
 apps/api                 Fastify e rotas HTTP
 packages/agent           loop de tool calling
 packages/ai              contrato AIProvider e OpenRouter
+packages/embeddings      contrato e adapters de embedding
+packages/eko             state machine, VAD, ring buffer e pipeline ambiental
 packages/tools           registry e cinco mocks
 packages/permissions     decisões ALLOW/DENY/REQUIRE_CONFIRMATION
 packages/confirmations   fluxo de aprovação vinculado
 packages/climate         provider, tools e broker outbound de dispositivos
 packages/audit           eventos e sanitização
-packages/memory          portas e adapter simples
+packages/memory          conversa, classifier e memória semântica
 packages/database        schema Drizzle/PostgreSQL
 packages/usage           observabilidade de IA e contratos de budget
 packages/voice           contratos STT/TTS, adapter OpenRouter e orquestração
@@ -64,6 +66,8 @@ curl -X POST http://127.0.0.1:3000/v1/confirmations/ID -H "authorization: Bearer
 Para voz, abra `http://127.0.0.1:3000/voice` (ou a URL HTTPS da VPS), informe o mesmo Bearer token e segure o botão para falar. A rota autenticada `POST /v1/voice` também aceita multipart com `audio` e `conversationId` opcional. Consulte [docs/voice.md](docs/voice.md) para contrato, formatos, privacidade e verificação real.
 
 Para conectar o Core na VPS a um Midea dentro da rede residencial sem port forwarding, consulte [docs/device-bridge.md](docs/device-bridge.md). O mock continua sendo o driver padrão.
+
+Para Ambient Memory, abra `http://127.0.0.1:3000/eko`. A rota autenticada `POST /v1/eko/segments` nunca passa pelo AgentRuntime, tools ou TTS. Controles, retenção, custos e pgvector estão em [docs/eko.md](docs/eko.md).
 
 ## Qualidade
 

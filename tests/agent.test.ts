@@ -9,7 +9,7 @@ import { AgentRuntime } from '@nox/agent';
 import { InMemoryAuditRepository, sanitize } from '@nox/audit';
 import { createClimateTools, MockClimateProvider } from '@nox/climate';
 import { InMemoryConfirmationRepository } from '@nox/confirmations';
-import { InMemoryMemoryStore } from '@nox/memory';
+import { InMemoryMemoryStore, type MemorySearch } from '@nox/memory';
 import { DefaultPermissionEngine } from '@nox/permissions';
 import { ToolRegistry, createMockTools } from '@nox/tools';
 import { InMemoryAIUsageRepository, type AIUsageRepository } from '@nox/usage';
@@ -56,6 +56,7 @@ function runtime(
     usage?: AIUsageRepository;
     contextMessageLimit?: number;
     onTelemetryError?: (error: unknown) => void;
+    memorySearch?: MemorySearch;
   } = {},
 ) {
   const tools = new ToolRegistry();
@@ -73,6 +74,7 @@ function runtime(
       tools,
       audit,
       memory: options.memory ?? new InMemoryMemoryStore(),
+      ...(options.memorySearch ? { memorySearch: options.memorySearch } : {}),
       confirmations: new InMemoryConfirmationRepository(),
       permissions: new DefaultPermissionEngine({ allowActionTools }),
       ...(options.contextMessageLimit !== undefined
@@ -341,6 +343,55 @@ describe('AgentRuntime', () => {
       latencyMs: 18,
       estimatedCost: '0.000010',
     });
+  });
+
+  it('injects only relevant long-term memories with provenance into ACTIVE context', async () => {
+    const provider = new QueueProvider([
+      {
+        message: { role: 'assistant', content: 'Foi mencionado que ele bateu o carro e está bem.' },
+      },
+    ]);
+    const memorySearch: MemorySearch = {
+      async search(input) {
+        expect(input).toMatchObject({ userId: 'u1', query: 'O que aconteceu com Fulano?' });
+        return [
+          {
+            id: 'memory-1',
+            userId: 'u1',
+            deviceId: 'test-device',
+            type: 'EVENT',
+            content: 'Foi mencionado que Fulano bateu o carro e está bem.',
+            importance: 0.9,
+            confidence: 0.88,
+            source: 'eko',
+            sourceTimestamp: new Date('2026-08-16T12:00:00Z'),
+            embedding: [1, 0],
+            embeddingModel: 'embedding',
+            createdAt: new Date('2026-08-16T12:00:00Z'),
+            updatedAt: new Date('2026-08-16T12:00:00Z'),
+            metadata: { speakerIdentity: 'unknown' },
+            similarity: 0.92,
+            score: 0.9,
+          },
+        ];
+      },
+    };
+    const subject = runtime(provider, false, { memorySearch });
+    await subject.runtime.run({ ...identity(), message: 'O que aconteceu com Fulano?' });
+    const memoryPrompt = provider.requests[0]?.messages.find(
+      (message, index) => index > 0 && message.role === 'system',
+    );
+    expect(memoryPrompt?.content).toContain('memory:memory-1');
+    expect(memoryPrompt?.content).toContain('source:eko');
+    expect(memoryPrompt?.content).toContain('confidence:0.88');
+    expect(
+      subject.audit.events.some(
+        (event) =>
+          event.type === 'memory_retrieval' &&
+          JSON.stringify(event.data).includes('"id":"memory-1"') &&
+          JSON.stringify(event.data).includes('"source":"eko"'),
+      ),
+    ).toBe(true);
   });
 });
 

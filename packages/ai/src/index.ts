@@ -5,6 +5,7 @@ export const MODEL_CAPABILITIES = [
   'CODING',
   'VISION',
   'MEMORY',
+  'EMBEDDING',
   'STT',
   'TTS',
 ] as const;
@@ -86,6 +87,8 @@ export class ConfiguredModelRouter implements ModelRouter {
         return this.models.REASONING ?? this.models.DEFAULT;
       case 'MEMORY':
         return this.models.FAST ?? this.models.DEFAULT;
+      case 'EMBEDDING':
+        return undefined;
       case 'DEFAULT':
         return this.models.DEFAULT;
       case 'VISION':
@@ -111,6 +114,10 @@ export type ChatRequest = {
   messages: AIMessage[];
   tools?: AITool[];
   reasoningEffort?: 'none' | 'minimal' | 'low' | 'medium' | 'high' | 'xhigh' | 'max';
+  responseSchema?: {
+    name: string;
+    schema: Record<string, unknown>;
+  };
   signal?: AbortSignal;
 };
 export type AIUsage = {
@@ -213,6 +220,19 @@ export class OpenRouterProvider implements AIProvider {
           tool_choice: request.tools?.length ? 'auto' : undefined,
           reasoning: request.reasoningEffort
             ? { effort: request.reasoningEffort, exclude: true }
+            : undefined,
+          response_format: request.responseSchema
+            ? {
+                type: 'json_schema',
+                json_schema: {
+                  name: request.responseSchema.name,
+                  strict: true,
+                  schema: request.responseSchema.schema,
+                },
+              }
+            : undefined,
+          provider: request.responseSchema
+            ? { require_parameters: true, data_collection: 'deny' }
             : undefined,
         }),
       },

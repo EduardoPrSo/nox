@@ -1,16 +1,28 @@
 import { randomUUID } from 'node:crypto';
 import type { ModelCapability } from '@nox/ai';
 
+export const AI_USAGE_OPERATIONS = [
+  'active_request',
+  'active_stt',
+  'ambient_stt',
+  'memory_classification',
+  'memory_embedding',
+  'memory_retrieval',
+  'tts',
+] as const;
+export type AIUsageOperation = (typeof AI_USAGE_OPERATIONS)[number];
+
 export type AIUsageRecord = {
   id: string;
   requestId: string;
   userId: string;
   deviceId: string;
   sessionId: string;
-  conversationId: string;
+  conversationId?: string;
   provider: string;
   model: string;
   capability: ModelCapability;
+  operation?: AIUsageOperation;
   inputTokens?: number;
   outputTokens?: number;
   totalTokens?: number;

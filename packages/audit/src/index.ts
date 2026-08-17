@@ -1,6 +1,7 @@
 import { randomUUID } from 'node:crypto';
 export type AuditEventType =
   | 'request'
+  | 'memory_retrieval'
   | 'tool_requested'
   | 'permission'
   | 'confirmation_created'

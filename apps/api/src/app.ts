@@ -28,8 +28,33 @@ import {
 } from '@nox/climate';
 import { InMemoryConfirmationRepository, type ConfirmationRepository } from '@nox/confirmations';
 import { createPostgresRepositories } from '@nox/database';
+import {
+  DeterministicEmbeddingProvider,
+  EmbeddingProviderError,
+  OpenRouterEmbeddingProvider,
+  type EmbeddingProvider,
+} from '@nox/embeddings';
+import {
+  EkoAmbientService,
+  EkoNotAmbientError,
+  EkoRateLimitError,
+  EkoRateLimiter,
+  EkoStateMachine,
+  InMemoryEkoStateRepository,
+  type EkoStateRepository,
+} from '@nox/eko';
 import { StaticTokenAuthenticator, type IdentityContext } from '@nox/identity';
-import { ConversationNotFoundError, InMemoryMemoryStore, type MemoryStore } from '@nox/memory';
+import {
+  ConversationNotFoundError,
+  InMemoryLongTermMemoryRepository,
+  InMemoryMemoryStore,
+  ModelMemoryClassifier,
+  SemanticMemorySearch,
+  type LongTermMemoryRepository,
+  type MemoryClassifier,
+  type MemorySearch,
+  type MemoryStore,
+} from '@nox/memory';
 import { DefaultPermissionEngine, type PermissionEngine } from '@nox/permissions';
 import type { Env } from '@nox/shared';
 import { ToolRegistry, createMockTools } from '@nox/tools';
@@ -39,6 +64,7 @@ import {
   InvalidVoiceAudioError,
   OpenRouterSpeechToTextProvider,
   OpenRouterTextToSpeechProvider,
+  SpeechProviderError,
   VoiceService,
   VoiceStageError,
   type SpeechToTextProvider,
@@ -46,6 +72,7 @@ import {
   validateVoiceAudio,
 } from '@nox/voice';
 import { VOICE_CLIENT_HTML } from './voice-client.js';
+import { EKO_CLIENT_HTML } from './eko-client.js';
 
 const chatSchema = z.object({
   conversationId: z.string().uuid().optional(),
@@ -55,6 +82,8 @@ const confirmationSchema = z.object({
   approved: z.boolean(),
   interactionMode: z.enum(['text', 'voice']).default('text'),
 });
+const ekoStateSchema = z.object({ state: z.enum(['OFF', 'AMBIENT']) }).strict();
+const listLimitSchema = z.coerce.number().int().min(1).max(100).default(20);
 type Overrides = {
   provider?: AIProvider;
   audit?: AuditRepository;
@@ -68,6 +97,11 @@ type Overrides = {
   tts?: TextToSpeechProvider;
   climate?: ClimateProvider;
   bridgeBroker?: DeviceCommandBroker;
+  embeddings?: EmbeddingProvider;
+  memoryClassifier?: MemoryClassifier;
+  longTermMemory?: LongTermMemoryRepository;
+  memorySearch?: MemorySearch;
+  ekoStates?: EkoStateRepository;
 };
 
 export function buildApp(env: Env, overrides: Overrides = {}): FastifyInstance {
@@ -76,7 +110,7 @@ export function buildApp(env: Env, overrides: Overrides = {}): FastifyInstance {
     bodyLimit: env.VOICE_MAX_UPLOAD_BYTES + 100_000,
   });
   void app.register(multipart, {
-    limits: { files: 1, fields: 1, fieldSize: 128, fileSize: env.VOICE_MAX_UPLOAD_BYTES },
+    limits: { files: 1, fields: 2, fieldSize: 128, fileSize: env.VOICE_MAX_UPLOAD_BYTES },
   });
   const authenticator = new StaticTokenAuthenticator(env.NOX_API_TOKEN, {
     userId: env.NOX_USER_ID,
@@ -109,6 +143,27 @@ export function buildApp(env: Env, overrides: Overrides = {}): FastifyInstance {
   const provider = overrides.provider ?? new OpenRouterProvider(openRouterOptions);
   const router = overrides.router ?? new ConfiguredModelRouter(modelConfiguration(env));
   const usage = overrides.usage ?? postgresRepositories?.usage ?? new InMemoryAIUsageRepository();
+  const embeddings =
+    overrides.embeddings ??
+    (env.NODE_ENV === 'test'
+      ? new DeterministicEmbeddingProvider(1536)
+      : new OpenRouterEmbeddingProvider({ ...openRouterOptions, dimensions: 1536 }));
+  const longTermMemory =
+    overrides.longTermMemory ??
+    postgresRepositories?.longTermMemory ??
+    new InMemoryLongTermMemoryRepository();
+  const ekoStates =
+    overrides.ekoStates ?? postgresRepositories?.ekoStates ?? new InMemoryEkoStateRepository();
+  const memorySearch =
+    overrides.memorySearch ??
+    new SemanticMemorySearch({
+      repository: longTermMemory,
+      embeddings,
+      embeddingModel: env.MODEL_EMBEDDING,
+      usage,
+      onTelemetryError: (error) => app.log.error({ err: error }, 'Could not persist memory usage'),
+    });
+  const stt = overrides.stt ?? new OpenRouterSpeechToTextProvider(openRouterOptions);
   const runtime = new AgentRuntime({
     provider,
     router,
@@ -129,6 +184,8 @@ export function buildApp(env: Env, overrides: Overrides = {}): FastifyInstance {
       new InMemoryConfirmationRepository(ttlMs),
     audit: overrides.audit ?? postgresRepositories?.audit ?? new InMemoryAuditRepository(),
     memory: overrides.memory ?? postgresRepositories?.memory ?? new InMemoryMemoryStore(),
+    memorySearch,
+    memorySearchLimit: env.EKO_MEMORY_RETRIEVAL_LIMIT,
     usage,
     contextMessageLimit: env.CONVERSATION_CONTEXT_MESSAGES,
     ...(env.CLIMATE_DRIVER === 'bridge'
@@ -140,12 +197,37 @@ export function buildApp(env: Env, overrides: Overrides = {}): FastifyInstance {
     runtime,
     router,
     usage,
-    stt: overrides.stt ?? new OpenRouterSpeechToTextProvider(openRouterOptions),
+    stt,
     tts: overrides.tts ?? new OpenRouterTextToSpeechProvider(openRouterOptions),
     language: env.VOICE_LANGUAGE,
     voice: env.VOICE_TTS_VOICE,
     maxTtsCharacters: env.VOICE_MAX_TTS_CHARACTERS,
     onTelemetryError: (error) => app.log.error({ err: error }, 'Could not persist voice usage'),
+  });
+  const eko = new EkoAmbientService({
+    states: ekoStates,
+    repository: longTermMemory,
+    stt,
+    classifier:
+      overrides.memoryClassifier ??
+      new ModelMemoryClassifier({
+        provider,
+        router,
+        reasoningEffort: env.MODEL_FAST_REASONING_EFFORT ?? 'none',
+      }),
+    embeddings,
+    router,
+    usage,
+    rateLimiter: new EkoRateLimiter({
+      maxSttMinutesPerHour: env.EKO_MAX_STT_MINUTES_PER_HOUR,
+      maxSegmentsPerMinute: env.EKO_MAX_SEGMENTS_PER_MINUTE,
+      maxMemoryExtractionsPerHour: env.EKO_MAX_MEMORY_EXTRACTIONS_PER_HOUR,
+    }),
+    language: env.VOICE_LANGUAGE,
+    embeddingModel: env.MODEL_EMBEDDING,
+    transcriptRetentionMs: env.EKO_TRANSCRIPT_RETENTION_HOURS * 3_600_000,
+    deduplicationThreshold: env.EKO_DEDUPLICATION_SIMILARITY,
+    onTelemetryError: (error) => app.log.error({ err: error }, 'Could not persist Eko usage'),
   });
   app.get('/health', async () => ({
     status: 'ok',
@@ -162,6 +244,18 @@ export function buildApp(env: Env, overrides: Overrides = {}): FastifyInstance {
       .header('referrer-policy', 'no-referrer')
       .type('text/html; charset=utf-8')
       .send(VOICE_CLIENT_HTML);
+  });
+  app.get('/eko', async (_request, reply) => {
+    return reply
+      .header('cache-control', 'no-store')
+      .header(
+        'content-security-policy',
+        "default-src 'self'; script-src 'unsafe-inline'; style-src 'unsafe-inline'; connect-src 'self'; media-src 'self' blob:; img-src 'none'; frame-ancestors 'none'",
+      )
+      .header('permissions-policy', 'microphone=(self)')
+      .header('referrer-policy', 'no-referrer')
+      .type('text/html; charset=utf-8')
+      .send(EKO_CLIENT_HTML);
   });
   if (env.CLIMATE_DRIVER === 'bridge' && !env.NOX_DEVICE_BRIDGE_TOKEN)
     throw new Error('NOX_DEVICE_BRIDGE_TOKEN is required when CLIMATE_DRIVER=bridge');
@@ -226,6 +320,116 @@ export function buildApp(env: Env, overrides: Overrides = {}): FastifyInstance {
         return reply.code(502).send({ error: 'AI_PROVIDER_FAILED', retryable: error.retryable });
       throw error;
     }
+  });
+  app.get('/v1/eko/state', async (request, reply) => {
+    const identity = identityFor(requestIdentities, request);
+    void reply.header('x-session-id', identity.sessionId);
+    return { state: await ekoStates.get(identity.userId, identity.deviceId) };
+  });
+  app.get('/v1/eko/config', async (request, reply) => {
+    const identity = identityFor(requestIdentities, request);
+    void reply.header('x-session-id', identity.sessionId);
+    return {
+      speechThreshold: env.EKO_VAD_SPEECH_THRESHOLD,
+      minimumSpeechMs: env.EKO_VAD_MINIMUM_SPEECH_MS,
+      silenceTimeoutMs: env.EKO_VAD_SILENCE_TIMEOUT_MS,
+      maximumSegmentMs: env.EKO_VAD_MAXIMUM_SEGMENT_MS,
+      ringBufferSeconds: env.EKO_RING_BUFFER_SECONDS,
+    };
+  });
+  app.post('/v1/eko/state', async (request, reply) => {
+    const identity = identityFor(requestIdentities, request);
+    void reply.header('x-session-id', identity.sessionId);
+    const body = ekoStateSchema.safeParse(request.body);
+    if (!body.success) return reply.code(400).send({ error: 'INVALID_INPUT' });
+    const current = await ekoStates.get(identity.userId, identity.deviceId);
+    const machine = new EkoStateMachine(current);
+    machine.transition(body.data.state);
+    return { state: await ekoStates.set(identity.userId, identity.deviceId, body.data.state) };
+  });
+  app.post('/v1/eko/segments', async (request, reply) => {
+    const identity = identityFor(requestIdentities, request);
+    void reply.header('x-session-id', identity.sessionId);
+    try {
+      const input = await readEkoSegmentRequest(request, env.EKO_VAD_MAXIMUM_SEGMENT_MS);
+      const result = await eko.processSegment({ ...identity, ...input });
+      return { ...result, ...(result.memory ? { memory: publicMemory(result.memory) } : {}) };
+    } catch (error) {
+      if (isMultipartLimitError(error))
+        return reply
+          .code(413)
+          .send({ error: 'AUDIO_TOO_LARGE', maxBytes: env.VOICE_MAX_UPLOAD_BYTES });
+      if (error instanceof VoiceRequestError)
+        return reply.code(error.status).send({ error: error.code });
+      if (error instanceof InvalidVoiceAudioError)
+        return reply
+          .code(error.code === 'UNSUPPORTED_AUDIO_TYPE' ? 415 : 400)
+          .send({ error: error.code });
+      if (error instanceof EkoNotAmbientError)
+        return reply.code(409).send({ error: 'EKO_NOT_AMBIENT' });
+      if (error instanceof EkoRateLimitError)
+        return reply.code(429).send({ error: 'EKO_RATE_LIMIT', limit: error.code });
+      if (error instanceof ModelCapabilityUnavailableError)
+        return reply.code(503).send({ error: 'EKO_NOT_CONFIGURED' });
+      if (error instanceof AIProviderError || error instanceof EmbeddingProviderError)
+        return reply.code(502).send({ error: 'AI_PROVIDER_FAILED', retryable: error.retryable });
+      if (error instanceof SpeechProviderError)
+        return reply.code(502).send({
+          error: 'STT_FAILED',
+          retryable: error.status === undefined || error.status === 429 || error.status >= 500,
+        });
+      throw error;
+    }
+  });
+  app.get('/v1/eko/transcripts', async (request, reply) => {
+    const identity = identityFor(requestIdentities, request);
+    void reply.header('x-session-id', identity.sessionId);
+    const query = z.object({ limit: listLimitSchema.optional() }).safeParse(request.query);
+    if (!query.success) return reply.code(400).send({ error: 'INVALID_INPUT' });
+    await longTermMemory.deleteExpiredTranscripts(new Date());
+    return {
+      transcripts: await longTermMemory.listAmbientTranscripts(
+        identity.userId,
+        identity.deviceId,
+        query.data.limit ?? 20,
+      ),
+    };
+  });
+  app.get('/v1/memories', async (request, reply) => {
+    const identity = identityFor(requestIdentities, request);
+    void reply.header('x-session-id', identity.sessionId);
+    const query = z
+      .object({
+        limit: listLimitSchema.optional(),
+        source: z.enum(['conversation', 'eko', 'explicit', 'tool', 'vision']).optional(),
+      })
+      .safeParse(request.query);
+    if (!query.success) return reply.code(400).send({ error: 'INVALID_INPUT' });
+    await longTermMemory.deleteExpiredLongTermMemories(new Date());
+    const memories = await longTermMemory.listLongTermMemories(
+      identity.userId,
+      query.data.limit ?? 20,
+      query.data.source,
+    );
+    return { memories: memories.map(publicMemory) };
+  });
+  app.delete('/v1/memories/:id', async (request, reply) => {
+    const identity = identityFor(requestIdentities, request);
+    void reply.header('x-session-id', identity.sessionId);
+    const params = z.object({ id: z.string().uuid() }).safeParse(request.params);
+    if (!params.success) return reply.code(400).send({ error: 'INVALID_INPUT' });
+    if (!(await longTermMemory.deleteLongTermMemory(params.data.id, identity.userId)))
+      return reply.code(404).send({ error: 'MEMORY_NOT_FOUND' });
+    return reply.code(204).send();
+  });
+  app.delete('/v1/memories', async (request, reply) => {
+    const identity = identityFor(requestIdentities, request);
+    void reply.header('x-session-id', identity.sessionId);
+    const query = z.object({ source: z.literal('eko') }).safeParse(request.query);
+    if (!query.success) return reply.code(400).send({ error: 'SOURCE_EKO_REQUIRED' });
+    return {
+      deleted: await longTermMemory.deleteLongTermMemoriesBySource(identity.userId, 'eko'),
+    };
   });
   app.post('/v1/voice', async (request, reply) => {
     const identity = identityFor(requestIdentities, request);
@@ -377,6 +581,58 @@ async function readVoiceRequest(
   return { ...validateVoiceAudio(audio, mimeType), ...(conversationId ? { conversationId } : {}) };
 }
 
+async function readEkoSegmentRequest(
+  request: FastifyRequest,
+  maximumSegmentMs: number,
+): Promise<
+  ReturnType<typeof validateVoiceAudio> & {
+    durationMs: number;
+    sourceContext: 'unknown' | 'media';
+  }
+> {
+  if (!request.isMultipart()) throw new VoiceRequestError(415, 'MULTIPART_REQUIRED');
+  let audio: Uint8Array | undefined;
+  let mimeType: string | undefined;
+  let durationMs: number | undefined;
+  let sourceContext: 'unknown' | 'media' = 'unknown';
+  try {
+    for await (const part of request.parts()) {
+      if (part.type === 'file') {
+        if (part.fieldname !== 'audio' || audio)
+          throw new VoiceRequestError(400, 'INVALID_MULTIPART');
+        audio = new Uint8Array(await part.toBuffer());
+        mimeType = part.mimetype;
+        continue;
+      }
+      if (typeof part.value !== 'string') throw new VoiceRequestError(400, 'INVALID_MULTIPART');
+      if (part.fieldname === 'durationMs' && durationMs === undefined) {
+        const parsed = z.coerce
+          .number()
+          .int()
+          .min(100)
+          .max(maximumSegmentMs + 2_000)
+          .safeParse(part.value);
+        if (!parsed.success) throw new VoiceRequestError(400, 'INVALID_MULTIPART');
+        durationMs = parsed.data;
+        continue;
+      }
+      if (part.fieldname === 'sourceContext' && sourceContext === 'unknown') {
+        const parsed = z.enum(['unknown', 'media']).safeParse(part.value);
+        if (!parsed.success) throw new VoiceRequestError(400, 'INVALID_MULTIPART');
+        sourceContext = parsed.data;
+        continue;
+      }
+      throw new VoiceRequestError(400, 'INVALID_MULTIPART');
+    }
+  } catch (error) {
+    if (error instanceof VoiceRequestError || isMultipartLimitError(error)) throw error;
+    throw new VoiceRequestError(400, 'INVALID_MULTIPART');
+  }
+  if (!audio || !mimeType) throw new VoiceRequestError(400, 'AUDIO_REQUIRED');
+  if (durationMs === undefined) throw new VoiceRequestError(400, 'INVALID_MULTIPART');
+  return { ...validateVoiceAudio(audio, mimeType), durationMs, sourceContext };
+}
+
 function isMultipartLimitError(error: unknown): boolean {
   if (!error || typeof error !== 'object' || !('code' in error)) return false;
   return [
@@ -398,6 +654,7 @@ function modelConfiguration(
   if (env.MODEL_CODING) models.CODING = env.MODEL_CODING;
   if (env.MODEL_VISION) models.VISION = env.MODEL_VISION;
   if (env.MODEL_MEMORY) models.MEMORY = env.MODEL_MEMORY;
+  models.EMBEDDING = env.MODEL_EMBEDDING;
   if (env.MODEL_STT) models.STT = env.MODEL_STT;
   if (env.MODEL_TTS) models.TTS = env.MODEL_TTS;
   return models;
@@ -414,4 +671,10 @@ function identityFor(
   const identity = identities.get(request);
   if (!identity) throw new Error('Authenticated identity is missing');
   return identity;
+}
+
+function publicMemory(
+  memory: Awaited<ReturnType<LongTermMemoryRepository['listLongTermMemories']>>[number],
+) {
+  return Object.fromEntries(Object.entries(memory).filter(([key]) => key !== 'embedding'));
 }

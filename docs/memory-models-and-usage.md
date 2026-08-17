@@ -10,7 +10,7 @@
 
 Uma conversa nova é criada quando `/v1/chat` recebe somente `message`. Para continuar, o cliente envia `{ "conversationId": "uuid", "message": "..." }`. O repository sempre combina `conversationId` com `userId`; inexistência e ownership inválido são indistinguíveis externamente.
 
-`CONVERSATION_CONTEXT_MESSAGES` limita quantas mensagens recentes são enviadas ao modelo (padrão 20, máximo 100). O limite é por quantidade, não por tokens. Summaries, retrieval, pgvector, Long-Term Memory e Eko não fazem parte deste milestone.
+`CONVERSATION_CONTEXT_MESSAGES` limita quantas mensagens recentes são enviadas ao modelo (padrão 20, máximo 100). Long-Term Memory permanece separada e injeta somente resultados semanticamente relevantes da pergunta atual.
 
 ## Dados persistidos e retenção
 
@@ -20,9 +20,9 @@ Atualmente são persistidos:
 - mensagens de usuário, assistente e tools necessárias para reconstruir o contexto;
 - metadata normalizada de uso: identidade, provider, modelo, capability, tokens/unidades, latência e custo quando informado.
 
-Não são persistidos headers HTTP, Bearer tokens, API keys, connection strings nem a resposta bruta do OpenRouter. Credenciais não devem ser enviadas no texto da conversa. O áudio bruto de uma interação de voz é descartado, mas sua transcrição vira uma mensagem normal da conversa e é persistida. Imagens, embeddings e transcrições ambientes não são armazenados neste milestone.
+Não são persistidos headers HTTP, Bearer tokens, API keys, connection strings nem a resposta bruta do OpenRouter. O áudio bruto é descartado. Transcrições ACTIVE viram mensagens da conversa; transcrições AMBIENT expiram por padrão em 24 horas. Memórias `KEEP` persistem importance, confidence, provenance e embedding.
 
-A retenção atual é indefinida porque ainda não há endpoint de exclusão. O schema prepara exclusão futura: apagar uma conversa remove suas mensagens por cascade; `ai_usage` e confirmações preservam observabilidade, mas perdem a referência da conversa com `ON DELETE SET NULL`. Uma futura operação de exclusão por usuário poderá localizar todas as linhas pelo `user_id` sem depender de busca semântica.
+Memórias de longo prazo podem ser listadas e apagadas com ownership por `/v1/memories`; apagar todas em massa exige `source=eko`. Consulte [eko.md](eko.md) para retenção e controles de privacidade.
 
 ## Model Router
 
@@ -37,7 +37,8 @@ MODEL_FAST_REASONING_EFFORT=none
 MODEL_DEFAULT_REASONING_EFFORT=low
 MODEL_REASONING_REASONING_EFFORT=high
 MODEL_CODING_REASONING_EFFORT=high
-MODEL_MEMORY=
+MODEL_MEMORY=openai/gpt-5.6-luna
+MODEL_EMBEDDING=openai/text-embedding-3-small
 MODEL_VISION=
 MODEL_STT=openai/gpt-4o-mini-transcribe
 MODEL_TTS=hexgrad/kokoro-82m
@@ -51,13 +52,13 @@ O esforço de raciocínio também pertence à policy. Luna em `FAST` usa `none` 
 
 Em outras palavras: **Luna trabalha, Terra pensa, Sol programa.** `CODING` apenas preserva o roteamento para um futuro coding agent; este milestone não implementa self-development.
 
-Fallbacks de **configuração** continuam finitos: `FAST → DEFAULT`, `REASONING → DEFAULT`, `CODING → REASONING → DEFAULT` e `MEMORY → FAST → DEFAULT`. `VISION`, `STT` e `TTS` não reaproveitam um modelo de texto silenciosamente. Isso é diferente de escalation: a policy escala antes da execução porque a tarefa exige outra capability.
+Fallbacks de **configuração** continuam finitos: `FAST → DEFAULT`, `REASONING → DEFAULT`, `CODING → REASONING → DEFAULT` e `MEMORY → FAST → DEFAULT`. `EMBEDDING`, `VISION`, `STT` e `TTS` exigem modelo apropriado. Isso é diferente de escalation: a policy escala antes da execução porque a tarefa exige outra capability.
 
 Falha técnica do provider não dispara hoje uma cascata entre modelos: a API retorna `AI_PROVIDER_FAILED` com `retryable`, quando aplicável. Essa política limitada evita repetir silenciosamente chamadas e possíveis efeitos. Um fallback técnico futuro deverá permitir no máximo uma alternativa previamente autorizada pelo backend e nunca executar novamente uma tool já concluída.
 
 ## AI usage e budget
 
-Uma linha é gravada por chamada ao provider. O custo usa decimal PostgreSQL (`numeric(24,12)`), nunca ponto flutuante no domínio. STT também pode registrar segundos e TTS caracteres faturáveis. Quando o provider não informa um campo, ele fica `null`. Falha de telemetria é registrada no logger da aplicação e não altera uma resposta válida.
+Uma linha é gravada por chamada ao provider. O custo usa decimal PostgreSQL (`numeric(24,12)`). `operation` separa `active_request`, `active_stt`, `ambient_stt`, `memory_classification`, `memory_embedding`, `memory_retrieval` e `tts`. STT também pode registrar segundos e TTS caracteres faturáveis. Falha de telemetria continua best-effort.
 
 `BudgetPolicy` define a fronteira para limites diários, mensais e por request, incluindo decisões explícitas `ALLOW`, `DOWNGRADE` ou `DENY`. A política ainda não é aplicada porque não há agregação transacional de gastos. Nenhum downgrade ou bloqueio silencioso ocorre neste milestone.
 

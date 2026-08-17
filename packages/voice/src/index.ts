@@ -535,6 +535,7 @@ function usageRecord(
     provider: usage.provider,
     model: usage.model,
     capability,
+    operation: capability === 'STT' ? 'active_stt' : 'tts',
     ...(usage.inputTokens !== undefined ? { inputTokens: usage.inputTokens } : {}),
     ...(usage.outputTokens !== undefined ? { outputTokens: usage.outputTokens } : {}),
     ...(usage.totalTokens !== undefined ? { totalTokens: usage.totalTokens } : {}),

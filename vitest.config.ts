@@ -9,6 +9,8 @@ const packageNames = [
   'confirmations',
   'climate',
   'database',
+  'eko',
+  'embeddings',
   'identity',
   'memory',
   'permissions',

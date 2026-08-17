@@ -33,6 +33,7 @@ export const envSchema = z.object({
   MODEL_CODING_REASONING_EFFORT: optionalReasoningEffort,
   MODEL_VISION: optionalModel,
   MODEL_MEMORY: optionalModel,
+  MODEL_EMBEDDING: z.string().min(1).default('openai/text-embedding-3-small'),
   MODEL_STT: z.string().min(1).default('openai/gpt-4o-mini-transcribe'),
   MODEL_TTS: z.string().min(1).default('hexgrad/kokoro-82m'),
   OPENROUTER_BASE_URL: z.string().url().default('https://openrouter.ai/api/v1'),
@@ -60,6 +61,17 @@ export const envSchema = z.object({
   VOICE_TTS_VOICE: z.string().min(1).max(128).default('pf_dora'),
   VOICE_MAX_UPLOAD_BYTES: z.coerce.number().int().min(1_024).max(10_000_000).default(2_000_000),
   VOICE_MAX_TTS_CHARACTERS: z.coerce.number().int().min(100).max(10_000).default(4_000),
+  EKO_TRANSCRIPT_RETENTION_HOURS: z.coerce.number().positive().max(168).default(24),
+  EKO_MAX_STT_MINUTES_PER_HOUR: z.coerce.number().positive().max(60).default(15),
+  EKO_MAX_SEGMENTS_PER_MINUTE: z.coerce.number().int().positive().max(60).default(6),
+  EKO_MAX_MEMORY_EXTRACTIONS_PER_HOUR: z.coerce.number().int().positive().max(1_000).default(30),
+  EKO_MEMORY_RETRIEVAL_LIMIT: z.coerce.number().int().positive().max(20).default(5),
+  EKO_DEDUPLICATION_SIMILARITY: z.coerce.number().min(0.5).max(1).default(0.9),
+  EKO_VAD_SPEECH_THRESHOLD: z.coerce.number().positive().max(1).default(0.025),
+  EKO_VAD_MINIMUM_SPEECH_MS: z.coerce.number().int().min(100).max(10_000).default(600),
+  EKO_VAD_SILENCE_TIMEOUT_MS: z.coerce.number().int().min(100).max(10_000).default(900),
+  EKO_VAD_MAXIMUM_SEGMENT_MS: z.coerce.number().int().min(1_000).max(60_000).default(30_000),
+  EKO_RING_BUFFER_SECONDS: z.coerce.number().int().min(5).max(120).default(45),
 });
 export type Env = z.infer<typeof envSchema>;
 export function loadEnv(source: NodeJS.ProcessEnv = process.env): Env {
