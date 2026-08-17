@@ -1,0 +1,12 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 512 512" role="img" aria-label="NOX Orb">
+  <defs>
+    <radialGradient id="bg" cx="50%" cy="42%" r="70%"><stop offset="0" stop-color="#202136"/><stop offset="1" stop-color="#08090d"/></radialGradient>
+    <radialGradient id="orb" cx="38%" cy="28%" r="70%"><stop offset="0" stop-color="#f0edff"/><stop offset=".25" stop-color="#bdb5ff"/><stop offset=".72" stop-color="#7768ee"/><stop offset="1" stop-color="#3f367e"/></radialGradient>
+    <filter id="glow" x="-80%" y="-80%" width="260%" height="260%"><feGaussianBlur stdDeviation="20"/></filter>
+  </defs>
+  <rect width="512" height="512" fill="url(#bg)"/>
+  <circle cx="256" cy="256" r="132" fill="none" stroke="#a69aff" stroke-opacity=".22" stroke-width="2"/>
+  <circle cx="256" cy="256" r="100" fill="#8174ff" opacity=".35" filter="url(#glow)"/>
+  <circle cx="256" cy="256" r="82" fill="url(#orb)"/>
+  <ellipse cx="228" cy="224" rx="27" ry="16" fill="#fff" opacity=".44" transform="rotate(-25 228 224)"/>
+</svg>

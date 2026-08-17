@@ -5,7 +5,7 @@
 - PostgreSQL/Supabase migrado e acessível pela VPS.
 - Docker Engine rootless com Compose para o usuário de deploy.
 - Um arquivo `/opt/nox/.env` legível somente pelo usuário de deploy.
-- A porta do container ligada somente a `127.0.0.1`; exposição pública deve passar por HTTPS no proxy reverso.
+- As portas dos containers ligadas somente a `127.0.0.1`; exposição pública deve passar por HTTPS no proxy reverso.
 
 Variáveis obrigatórias de produção:
 
@@ -40,15 +40,18 @@ A migration `0002_brave_beyonder.sql` também é aditiva e acrescenta unidades f
 docker compose up -d --build
 docker compose ps
 curl --fail http://127.0.0.1:3000/health
+curl --fail http://127.0.0.1:3001/web-health
 ```
 
-O serviço usa filesystem somente leitura, remove capabilities Linux, impede privilege escalation e publica a API apenas em `127.0.0.1:3000`.
+Os serviços usam filesystem somente leitura, removem capabilities Linux e impedem privilege escalation. A API é publicada apenas em `127.0.0.1:3000`; o frontend Next.js standalone, apenas em `127.0.0.1:3001`.
+
+O arquivo `deploy/nginx/nox.conf` contém a configuração do domínio. `/health`, `/v1/*`, `/bridge/*`, `/voice` e `/eko` seguem para a API; as demais rotas seguem para o frontend. O upstream web possui fallback para a API durante o primeiro deploy ou uma indisponibilidade do container, e somente o Nginx escuta nas portas públicas 80/443.
 
 Na VPS, o daemon Docker roda como serviço de usuário com `loginctl enable-linger`. Isso substitui `screen`: o daemon inicia no boot e o Compose aplica `restart: unless-stopped`, sem conceder ao usuário de CI acesso ao Docker root da máquina.
 
 ## CI/CD
 
-Pull requests executam typecheck, lint, testes, build e verificação de formatação. Pushes na `main` repetem essas validações e publicam duas tags no GHCR:
+Pull requests executam typecheck, lint, testes, builds da API e do frontend e verificação de formatação. Pushes na `main` repetem essas validações e publicam duas imagens no GHCR, `nox` e `nox-web`, cada uma com duas tags:
 
 - `sha-<commit>`: tag imutável usada no deploy;
 - `latest`: conveniência, nunca usada como referência de rollback.
@@ -60,9 +63,9 @@ O environment `production` do GitHub precisa destes secrets:
 - `VPS_SSH_PRIVATE_KEY`
 - `VPS_KNOWN_HOSTS`
 
-O deploy atualiza o checkout da VPS para o SHA exato, baixa a imagem, inicia o container e aguarda `/health`. Se o healthcheck falhar, `scripts/deploy.sh` restaura a imagem anterior automaticamente.
+O deploy atualiza o checkout da VPS para o SHA exato, baixa as duas imagens e inicia o par de containers. Se qualquer healthcheck falhar, `scripts/deploy.sh` restaura as duas imagens anteriores automaticamente. No primeiro deploy do frontend, quando ainda não existe imagem web anterior, o serviço web novo é removido e o fallback do Nginx mantém a API acessível.
 
-O SHA do commit é gravado em `APP_VERSION` durante o build. O deploy só conclui quando `https://dudunox.duckdns.org/health` responde `200` e informa exatamente esse SHA. O rollback automático também confirma que a imagem anterior voltou a responder antes de encerrar.
+O SHA do commit é gravado em `APP_VERSION` durante os dois builds. O deploy só conclui quando `https://dudunox.duckdns.org/health` e `https://dudunox.duckdns.org/web-health` respondem `200` e informam exatamente esse SHA. O rollback automático também confirma que o par anterior voltou a responder antes de encerrar.
 
 ## Fluxo de PR e proteção da main
 
@@ -81,7 +84,7 @@ cd /opt/nox
 bash scripts/rollback.sh
 ```
 
-O rollback manual sobe a imagem registrada em `.previous-image`, espera o healthcheck local e troca os registros de imagem atual/anterior, permitindo desfazer o rollback com o mesmo comando se necessário.
+O rollback manual sobe o par registrado em `.previous-image` e `.previous-web-image`, espera os healthchecks e troca os registros atuais/anteriores, permitindo desfazer o rollback com o mesmo comando se necessário.
 
 ## Validação de persistência
 

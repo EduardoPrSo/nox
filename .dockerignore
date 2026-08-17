@@ -3,6 +3,10 @@
 .env
 dist
 node_modules
+**/node_modules
+.next
+**/.next
+coverage
 .venv
 __pycache__
 .pytest_cache

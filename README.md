@@ -14,6 +14,7 @@ Fundação do backend de um agente pessoal multimodal, independente dos clientes
 
 ```text
 apps/api                 Fastify e rotas HTTP
+apps/web                 frontend oficial Next.js/PWA
 packages/agent           loop de tool calling
 packages/ai              contrato AIProvider e OpenRouter
 packages/embeddings      contrato e adapters de embedding
@@ -47,6 +48,16 @@ cp .env.example .env
 pnpm dev
 ```
 
+O frontend de produto do Milestone 6A usa dados mockados e roda separadamente no desenvolvimento:
+
+```bash
+pnpm dev:web
+```
+
+Abra `http://localhost:3000` e consulte [docs/frontend.md](docs/frontend.md) para arquitetura, rotas, design system e limites do 6A.
+
+Em produção, `https://dudunox.duckdns.org/` serve a PWA. O proxy mantém `/health`, `/v1/*`, `/bridge/*`, `/voice` e `/eko` direcionados para a API.
+
 Preencha `OPENROUTER_API_KEY` e gere um `NOX_API_TOKEN` aleatório com pelo menos 32 caracteres. Para permitir tools ACTION sem confirmação, defina `ACTION_TOOLS_AUTO_ALLOWED=true`. EXTERNAL continua exigindo confirmação.
 
 O padrão é `PERSISTENCE_DRIVER=in-memory`. Para Supabase, use a connection string PostgreSQL do projeto em `DATABASE_URL`, defina `PERSISTENCE_DRIVER=postgres` e aplique `pnpm db:migrate`. O backend não usa nem precisa do SDK Supabase neste milestone.
@@ -76,6 +87,7 @@ pnpm typecheck
 pnpm lint
 pnpm test
 pnpm build
+pnpm build:web
 pnpm format:check
 ```
 
