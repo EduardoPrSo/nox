@@ -111,7 +111,7 @@ jobs:
           VPS_HOST: ${{ secrets.VPS_HOST }}
           VPS_USER: ${{ secrets.VPS_USER }}
         run: |
-          printf '%s' "$GHCR_TOKEN" | ssh -o ServerAliveInterval=30 -o ServerAliveCountMax=20 \
+          printf '%s' "$GHCR_TOKEN" | ssh -o ServerAliveInterval=30 -o ServerAliveCountMax=120 \
             -i ~/.ssh/nox_deploy "$VPS_USER@$VPS_HOST" \
             "docker login ghcr.io -u '$GITHUB_ACTOR' --password-stdin"
       - name: Deploy and verify health
@@ -121,6 +121,6 @@ jobs:
           VPS_HOST: ${{ secrets.VPS_HOST }}
           VPS_USER: ${{ secrets.VPS_USER }}
         run: |
-          ssh -o ServerAliveInterval=30 -o ServerAliveCountMax=20 \
+          ssh -o ServerAliveInterval=30 -o ServerAliveCountMax=120 \
             -i ~/.ssh/nox_deploy "$VPS_USER@$VPS_HOST" \
             "cd /opt/nox && git fetch origin main && git checkout --detach '$GITHUB_SHA' && NOX_IMAGE='$DEPLOY_API_IMAGE' NOX_WEB_IMAGE='$DEPLOY_WEB_IMAGE' EXPECTED_VERSION='$GITHUB_SHA' HEALTH_URL='https://dudunox.duckdns.org/health' WEB_HEALTH_URL='https://dudunox.duckdns.org/web-health' bash scripts/deploy.sh"

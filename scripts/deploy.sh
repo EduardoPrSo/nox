@@ -60,7 +60,7 @@ rollback() {
 
 pull_succeeded=false
 for attempt in 1 2 3; do
-  if NOX_IMAGE="$NOX_IMAGE" NOX_WEB_IMAGE="$NOX_WEB_IMAGE" "${COMPOSE[@]}" pull --quiet nox web; then
+  if NOX_IMAGE="$NOX_IMAGE" NOX_WEB_IMAGE="$NOX_WEB_IMAGE" "${COMPOSE[@]}" pull nox web; then
     pull_succeeded=true
     break
   fi
