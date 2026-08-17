@@ -8,6 +8,9 @@ const appDirectory = path.dirname(fileURLToPath(import.meta.url));
 const nextConfig: NextConfig = {
   output: 'standalone',
   outputFileTracingRoot: path.join(appDirectory, '../..'),
+  outputFileTracingIncludes: {
+    '/*': ['../../node_modules/.pnpm/@swc+helpers@*/node_modules/@swc/helpers/**/*'],
+  },
   reactStrictMode: true,
   poweredByHeader: false,
   async headers() {
